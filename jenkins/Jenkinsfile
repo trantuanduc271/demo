@@ -1,28 +1,87 @@
 pipeline {
-    agent any
-    options {
-        skipStagesAfterUnstable()
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: agent
+spec:
+  containers:
+  - name: maven
+    image: maven:3.8-jdk-11
+    command:
+    - cat
+    tty: true
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+'''
+        }
     }
+    
     stages {
-        stage('Build') {
+        stage('Checkout') {
             steps {
-                sh 'mvn -B -DskipTests clean package'
+                echo '📥 Checking out source code...'
+                checkout scm
             }
         }
-        stage('Test') {
+        
+        stage('Build') {
             steps {
-                sh 'mvn test'
-            }
-            post {
-                always {
-                    junit 'target/surefire-reports/*.xml'
+                container('maven') {
+                    echo '🔨 Building application...'
+                    sh 'mvn --version'
+                    sh 'mvn clean compile'
                 }
             }
         }
-        stage('Deliver') { 
+        
+        stage('Test') {
             steps {
-                sh './jenkins/scripts/deliver.sh' 
+                container('maven') {
+                    echo '🧪 Running tests...'
+                    sh 'mvn test'
+                }
+            }
+        }
+        
+        stage('Package') {
+            steps {
+                container('maven') {
+                    echo '📦 Packaging application...'
+                    sh 'mvn package -DskipTests'
+                }
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                echo '💾 Archiving artifacts...'
+                archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
             }
         }
     }
+    
+    post {
+        success {
+            echo '✅ BUILD SUCCESSFUL!'
+            echo '================================'
+            echo 'All stages completed successfully'
+            echo '================================'
+        }
+        failure {
+            echo '❌ BUILD FAILED!'
+        }
+        always {
+            echo '🧹 Pipeline finished'
+        }
+    }
 }
+
