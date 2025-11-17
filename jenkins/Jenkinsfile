@@ -1,3 +1,18 @@
+// ============================================================================
+// GRADUAL MIGRATION TO GROOVY PIPELINE STRUCTURE
+// ============================================================================
+// Phase 1: Load groovy files (currently commented out - activate gradually)
+// Phase 2: Replace stages one by one with groovy functions
+// Phase 3: Add event-based routing (push/PR/tag)
+// ============================================================================
+
+// ============================================================================
+// STEP 1: Load groovy files (TEST ONLY - not using functions yet)
+// ============================================================================
+// Loading groovy files to verify they can be loaded without breaking pipeline
+// Functions are NOT called yet - this is just a test of file loading
+// ============================================================================
+
 pipeline {
     agent {
         kubernetes {
@@ -57,10 +72,46 @@ spec:
     }
     
     stages {
+        // NOTE: When using groovy functions, checkout is handled INSIDE each function
+        // - unitTestAndCodeCoverage() has stage("Checkout source code")
+        // - sonarQubeScan() has stage("Checkout Source Code")
+        // - buildService() has stage("Checkout Source Code")
+        // So when migrating to groovy functions, this stage should be REMOVED, not replaced
+        
         stage('Checkout') {
             steps {
                 echo '📥 Checking out source code...'
                 checkout scm
+            }
+        }
+        
+        // STEP 1: Test loading groovy files (SAFEST FIRST STEP)
+        // This stage only loads the files - doesn't use them yet
+        stage('Test Groovy File Loading') {
+            steps {
+                script {
+                    echo '📚 STEP 1: Loading groovy files to verify they can be loaded...'
+                    try {
+                        // Load groovy library files
+                        def jenkinsfile_CI = load 'setup/cicd/jenkinsfile_CI.groovy'
+                        def jenkinsfile_utils = load 'setup/cicd/jenkinsfile_utils.groovy'
+                        def jenkinsfile_CD = load 'setup/cicd/jenkinsfile_CD.groovy'
+                        
+                        echo '✅ SUCCESS: All groovy files loaded successfully!'
+                        echo "   - jenkinsfile_CI loaded with functions: ${jenkinsfile_CI.keySet()}"
+                        echo "   - jenkinsfile_utils loaded with functions: ${jenkinsfile_utils.keySet()}"
+                        echo "   - jenkinsfile_CD loaded with functions: ${jenkinsfile_CD.keySet()}"
+                        echo ''
+                        echo 'ℹ️  NOTE: Files are loaded but NOT used yet.'
+                        echo '   Pipeline continues with existing stages below.'
+                        echo '   Next step: Start using these functions gradually.'
+                        
+                    } catch (Exception e) {
+                        echo "❌ ERROR: Failed to load groovy files: ${e.message}"
+                        echo "   Stack trace: ${e.printStackTrace()}"
+                        throw e
+                    }
+                }
             }
         }
         
@@ -88,6 +139,19 @@ spec:
             }
         }
         
+        /* TODO: Replace Test + Package stages with groovy unitTestAndCodeCoverage() function
+                 NOTE: This function INCLUDES its own checkout stage, so remove the Checkout stage above
+        stage('Unit Test & Code Coverage') {
+            steps {
+                script {
+                    // This function handles: Checkout + Test + Code Coverage
+                    // Remove 'Checkout' and 'Test' stages above when uncommenting this
+                    jenkinsfile_CI.unitTestAndCodeCoverage("PUSH")
+                }
+            }
+        }
+        */
+        
         stage('Package') {
             steps {
                 container('maven') {
@@ -96,6 +160,19 @@ spec:
                 }
             }
         }
+        
+        /* TODO: Replace Package stage with groovy buildService() function when ready
+                 NOTE: This function INCLUDES its own checkout stage
+        stage('Build Service') {
+            steps {
+                script {
+                    // This function handles: Checkout + Build
+                    // Remove 'Checkout' and 'Package' stages above when uncommenting this
+                    jenkinsfile_CI.buildService("PUSH")
+                }
+            }
+        }
+        */
         
         stage('Build & Push Docker Image') {
             steps {
@@ -114,6 +191,17 @@ spec:
                 }
             }
         }
+        
+        /* TODO: Replace with groovy pushImageDocker() function when ready
+        stage('Push Image To Harbor') {
+            steps {
+                script {
+                    // Use groovy function
+                    // jenkinsfile_CI.pushImageDocker()
+                }
+            }
+        }
+        */
         
         stage('Deploy to Kubernetes') {
             steps {
@@ -143,6 +231,41 @@ spec:
                 }
             }
         }
+        
+        /* TODO: Replace with groovy release2k8s() function when ready
+        stage('Deploy to K8s') {
+            steps {
+                script {
+                    // Use groovy function
+                    // jenkinsfile_CI.release2k8s("k8s-test-performance", "patient", "telecare-k8s-config")
+                }
+            }
+        }
+        */
+        
+        /* TODO: Add SonarQube scan when ready
+                 NOTE: This function INCLUDES its own checkout stage
+        stage('SonarQube Scan') {
+            steps {
+                script {
+                    // This function handles: Checkout + SonarQube Scan + Quality Gate
+                    // Remove 'Checkout' stage above when uncommenting this (unless using parallel)
+                    jenkinsfile_CI.sonarQubeScan("PUSH")
+                }
+            }
+        }
+        */
+        
+        /* TODO: Add security scan when ready
+        stage('Security Scan') {
+            steps {
+                script {
+                    // Use groovy function
+                    // jenkinsfile_CI.acunetixScan("${env.STAGING_IP}:${env.STAGING_PORT}")
+                }
+            }
+        }
+        */
     }
     
     post {
@@ -163,3 +286,38 @@ spec:
     }
 }
 
+/* ============================================================================
+   FUTURE: Scripted Pipeline with Event-Based Routing
+   ============================================================================
+   TODO: Replace entire pipeline above with this when ready for full migration
+   
+node {
+    // Load groovy library files
+    jenkinsfile_CI = load 'setup/cicd/jenkinsfile_CI.groovy'
+    jenkinsfile_utils = load 'setup/cicd/jenkinsfile_utils.groovy'
+    jenkinsfile_CD = load 'setup/cicd/jenkinsfile_CD.groovy'
+    
+    // TODO: Adapt checkBuildType() for GitHub
+    // Currently uses gitlabActionType - need to adapt for GitHub webhook events
+    // GitHub uses different env vars: CHANGE_ID, CHANGE_TARGET, etc.
+    
+    // Check build type based on event (push/PR/tag)
+    def buildType = checkBuildType() // TODO: Adapt for GitHub
+    
+    // Route to appropriate pipeline
+    switch(buildType) {
+        case "push_commit_build":
+            // jenkinsfile_CI.buildPushCommit()
+            break
+        case "merge_request_build":
+            // jenkinsfile_CI.buildMergeRequest()
+            break
+        case "deploy_production":
+            // jenkinsfile_CD.deployToProduction()
+            break
+        default:
+            // Fallback to current pipeline
+            break
+    }
+}
+============================================================================ */
