@@ -73,4 +73,3 @@ spec:
             name: my-java-app
             port:
               number: 80
-
