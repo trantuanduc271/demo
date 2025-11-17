@@ -10,7 +10,7 @@ metadata:
 spec:
   containers:
   - name: maven
-    image: maven:3.8-jdk-11
+    image: maven:3.9-jdk-21
     command:
     - cat
     tty: true
