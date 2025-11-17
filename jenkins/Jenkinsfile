@@ -27,11 +27,21 @@ spec:
     command:
     - /busybox/cat
     tty: true
+    volumeMounts:
+    - name: kaniko-secret
+      mountPath: /secret
+    env:
+    - name: GOOGLE_APPLICATION_CREDENTIALS
+      value: /secret/kaniko-sa-key.json
   - name: kubectl
     image: bitnami/kubectl:latest
     command:
     - cat
     tty: true
+  volumes:
+  - name: kaniko-secret
+    secret:
+      secretName: kaniko-secret
 '''
         }
     }
@@ -109,6 +119,7 @@ spec:
             steps {
                 container('kubectl') {
                     echo "🚀 Deploying to Kubernetes..."
+                    echo "Using image: ${FULL_IMAGE}"
                     sh """
                         # Update image in deployment
                         sed 's|IMAGE_URL_PLACEHOLDER|${FULL_IMAGE}|g' k8s-deployment.yaml > k8s-deployment-updated.yaml
