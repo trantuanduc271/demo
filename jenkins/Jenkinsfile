@@ -37,7 +37,7 @@ spec:
     }
     
     environment {
-        GCP_PROJECT = 'YOUR_PROJECT_ID'  // CHANGE THIS!
+        GCP_PROJECT = 'shared-services-445608'
         GCP_REGION = 'us-central1'
         IMAGE_REPO = "${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/my-java-app"
         IMAGE_NAME = 'my-app'
