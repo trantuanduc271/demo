@@ -120,10 +120,13 @@ spec:
                 container('kubectl') {
                     echo "🚀 Deploying to Kubernetes..."
                     echo "Using image: ${FULL_IMAGE}"
+                    script {
+                        // Read and update the deployment YAML
+                        def deploymentYaml = readFile('k8s-deployment.yaml')
+                        deploymentYaml = deploymentYaml.replace('IMAGE_URL_PLACEHOLDER', env.FULL_IMAGE)
+                        writeFile file: 'k8s-deployment-updated.yaml', text: deploymentYaml
+                    }
                     sh """
-                        # Update image in deployment
-                        sed 's|IMAGE_URL_PLACEHOLDER|${FULL_IMAGE}|g' k8s-deployment.yaml > k8s-deployment-updated.yaml
-                        
                         # Apply manifests
                         kubectl apply -f k8s-deployment-updated.yaml
                         
