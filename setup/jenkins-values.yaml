@@ -1,0 +1,40 @@
+controller:
+  # Admin credentials
+  admin:
+    username: "admin"
+  # Resource allocation
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+  
+  # Java heap settings
+  javaOpts: "-Xms2048m -Xmx2048m"
+  
+  # Ingress with TLS
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hostName: jenkins.ducttdevops.com
+    tls:
+      - secretName: jenkins-ducttdevops-tls
+        hosts:
+          - jenkins.ducttdevops.com
+
+# Persistent storage for Jenkins data
+persistence:
+  enabled: true
+  size: 20Gi
+
+# RBAC
+serviceAccount:
+  create: true
+
+rbac:
+  create: true
