@@ -8,6 +8,7 @@ metadata:
   labels:
     jenkins: agent
 spec:
+  serviceAccountName: jenkins
   containers:
   - name: maven
     image: maven:3.9.9-eclipse-temurin-21
@@ -21,8 +22,28 @@ spec:
       limits:
         memory: "2Gi"
         cpu: "1000m"
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:debug
+    command:
+    - /busybox/cat
+    tty: true
+  - name: kubectl
+    image: bitnami/kubectl:latest
+    command:
+    - cat
+    tty: true
 '''
         }
+    }
+    
+    environment {
+        GCP_PROJECT = 'YOUR_PROJECT_ID'  // CHANGE THIS!
+        GCP_REGION = 'us-central1'
+        IMAGE_REPO = "${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/my-java-app"
+        IMAGE_NAME = 'my-app'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        FULL_IMAGE = "${IMAGE_REPO}/${IMAGE_NAME}:${IMAGE_TAG}"
+        APP_DOMAIN = 'app.ducttdevops.com'
     }
     
     stages {
@@ -33,7 +54,7 @@ spec:
             }
         }
         
-        stage('Build') {
+        stage('Build with Maven') {
             steps {
                 container('maven') {
                     echo '🔨 Building application...'
@@ -50,6 +71,11 @@ spec:
                     sh 'mvn test'
                 }
             }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
         }
         
         stage('Package') {
@@ -61,26 +87,64 @@ spec:
             }
         }
         
-        stage('Archive') {
+        stage('Build & Push Docker Image') {
             steps {
-                echo '💾 Archiving artifacts...'
-                archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
+                container('kaniko') {
+                    echo "🐳 Building and pushing image with Kaniko..."
+                    echo "Image: ${FULL_IMAGE}"
+                    sh """
+                        /kaniko/executor \
+                            --context=\${WORKSPACE} \
+                            --dockerfile=\${WORKSPACE}/Dockerfile \
+                            --destination=${FULL_IMAGE} \
+                            --destination=${IMAGE_REPO}/${IMAGE_NAME}:latest \
+                            --cache=true \
+                            --cache-ttl=24h
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                container('kubectl') {
+                    echo "🚀 Deploying to Kubernetes..."
+                    sh """
+                        # Update image in deployment
+                        sed 's|IMAGE_URL_PLACEHOLDER|${FULL_IMAGE}|g' k8s-deployment.yaml > k8s-deployment-updated.yaml
+                        
+                        # Apply manifests
+                        kubectl apply -f k8s-deployment-updated.yaml
+                        
+                        # Wait for rollout
+                        kubectl rollout status deployment/my-java-app -n default --timeout=5m
+                        
+                        # Show deployment info
+                        echo "===== Deployment Status ====="
+                        kubectl get deployment my-java-app -n default
+                        kubectl get pods -l app=my-java-app -n default
+                        kubectl get svc my-java-app -n default
+                        kubectl get ingress my-java-app -n default
+                    """
+                }
             }
         }
     }
     
     post {
         success {
-            echo '✅ BUILD SUCCESSFUL!'
+            echo '✅ BUILD & DEPLOYMENT SUCCESSFUL!'
             echo '================================'
-            echo 'All stages completed successfully'
+            echo "Image: ${FULL_IMAGE}"
+            echo "Application URL: https://${APP_DOMAIN}"
             echo '================================'
         }
         failure {
-            echo '❌ BUILD FAILED!'
+            echo '❌ BUILD OR DEPLOYMENT FAILED!'
         }
         always {
             echo '🧹 Pipeline finished'
+            archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
         }
     }
 }
