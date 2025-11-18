@@ -64,14 +64,73 @@ spec:
                     env.IS_PR = env.CHANGE_ID ? 'true' : 'false'
                     env.BUILD_TYPE = env.CHANGE_ID ? 'Pull Request' : 'Push'
                     
+                    // Detect if this build was triggered by a PR close event
+                    // Check GitHub webhook cause for PR actions
+                    def isPRCloseEvent = false
+                    def prAction = null
+                    
+                    try {
+                        // Check for GitHubPullRequestCause (for PR builds)
+                        def prCause = currentBuild.rawBuild.getCause(
+                            org.jenkinsci.plugins.github_branch_source.GitHubPullRequestCause
+                        )
+                        
+                        if (prCause) {
+                            prAction = prCause.action
+                            echo "PR Cause detected - Action: ${prAction}"
+                            
+                            // Skip closed/edited PRs
+                            if (prAction in ['closed', 'edited']) {
+                                isPRCloseEvent = true
+                                echo "⚠️  Detected PR ${prAction} event - CI will be skipped"
+                            }
+                        } else {
+                            // For branch builds, check all causes to see if triggered by PR close
+                            def causes = currentBuild.rawBuild.getCauses()
+                            for (def cause : causes) {
+                                if (cause.class.simpleName == 'GitHubPullRequestCause') {
+                                    prAction = cause.action
+                                    if (prAction in ['closed', 'edited']) {
+                                        isPRCloseEvent = true
+                                        echo "⚠️  Branch build triggered by PR ${prAction} event - CI will be skipped"
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "Could not check PR cause: ${e.message}"
+                        // Fallback: check commit message for merge patterns
+                        def commitMsg = sh(
+                            script: 'git log -1 --pretty=%B',
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (commitMsg) {
+                            def mergePattern = ~/(?i)merge\s+pull\s+request\s+#\d+/
+                            if (commitMsg =~ mergePattern) {
+                                isPRCloseEvent = true
+                                echo "⚠️  Detected merge commit - CI will be skipped"
+                            }
+                        }
+                    }
+                    
+                    env.IS_PR_CLOSE_EVENT = isPRCloseEvent ? 'true' : 'false'
+                    
                     echo '📥 Checking out source code...'
                     echo "Build Type: ${env.BUILD_TYPE}"
                     if (env.CHANGE_ID) {
                         echo "PR Number: ${env.CHANGE_ID}"
                         echo "Source Branch: ${env.BRANCH_NAME}"
                         echo "Target Branch: ${env.CHANGE_TARGET}"
+                        if (prAction) {
+                            echo "PR Action: ${prAction}"
+                        }
                     } else {
                         echo "Branch: ${env.BRANCH_NAME}"
+                        if (isPRCloseEvent) {
+                            echo "⚠️  PR close/merge event detected - CI will be skipped"
+                        }
                     }
                 }
             }
@@ -118,6 +177,7 @@ spec:
             when {
                 allOf {
                     expression { return env.CHANGE_ID == null }
+                    expression { return env.IS_PR_CLOSE_EVENT != 'true' }
                     anyOf {
                         branch 'main'
                         branch 'master'
@@ -146,6 +206,7 @@ spec:
             when {
                 allOf {
                     expression { return env.CHANGE_ID == null }
+                    expression { return env.IS_PR_CLOSE_EVENT != 'true' }
                     anyOf {
                         branch 'main'
                         branch 'master'
@@ -191,7 +252,17 @@ spec:
                 } else {
                     script {
                         def isDeployableBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'develop'
-                        if (isDeployableBranch) {
+                        def isPRClose = env.IS_PR_CLOSE_EVENT == 'true'
+                        
+                        if (isPRClose) {
+                            echo '✅ VALIDATION SUCCESSFUL!'
+                            echo '================================'
+                            echo "Branch: ${env.BRANCH_NAME}"
+                            echo "Validation completed successfully"
+                            echo "⚠️  CI pipeline skipped - detected PR close/merge event"
+                            echo "This prevents CI from running when PRs are closed"
+                            echo '================================'
+                        } else if (isDeployableBranch) {
                             echo '✅ VALIDATION & CI PIPELINE SUCCESSFUL!'
                             echo '================================'
                             echo "Branch: ${env.BRANCH_NAME}"
