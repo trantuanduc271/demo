@@ -78,9 +78,6 @@ spec:
         }
         
         stage('Build') {
-            when {
-                expression { return env.CHANGE_ID != null }
-            }
             steps {
                 container('maven') {
                     echo '🔨 Building application...'
@@ -90,10 +87,7 @@ spec:
             }
         }
         
-        stage('PR Validation') {
-            when {
-                expression { return env.CHANGE_ID != null }
-            }
+        stage('Validation') {
             parallel {
                 stage('Test') {
                     steps {
@@ -177,13 +171,14 @@ spec:
                     echo '✅ PULL REQUEST VALIDATION SUCCESSFUL!'
                     echo '================================'
                     echo "PR Number: ${env.CHANGE_ID}"
-                    echo "Build, Test, and Package completed"
-                    echo "Docker Image and Deploy stages were skipped for PR"
+                    echo "Validation completed successfully"
+                    echo "CI pipeline (Docker build & Deploy) will run after PR merge"
                     echo '================================'
                 } else {
-                    echo '✅ BUILD & DEPLOYMENT SUCCESSFUL!'
+                    echo '✅ VALIDATION & CI PIPELINE SUCCESSFUL!'
                     echo '================================'
                     echo "Branch: ${env.BRANCH_NAME}"
+                    echo "Validation passed - CI pipeline completed"
                     echo "Image: ${FULL_IMAGE}"
                     echo "Application URL: https://${APP_DOMAIN}"
                     echo '================================'
@@ -193,11 +188,22 @@ spec:
         failure {
             script {
                 if (env.CHANGE_ID) {
-                    echo '❌ PULL REQUEST BUILD FAILED!'
+                    echo '❌ PULL REQUEST VALIDATION FAILED!'
                     echo "PR Number: ${env.CHANGE_ID}"
+                    echo "Validation failed - CI pipeline will not run"
                 } else {
-                    echo '❌ BUILD OR DEPLOYMENT FAILED!'
-                    echo "Branch: ${env.BRANCH_NAME}"
+                    script {
+                        def validationFailed = currentBuild.result == 'FAILURE'
+                        if (validationFailed && currentBuild.stageName?.contains('Validation')) {
+                            echo '❌ VALIDATION FAILED!'
+                            echo "Branch: ${env.BRANCH_NAME}"
+                            echo "Validation failed - CI pipeline was not executed"
+                        } else {
+                            echo '❌ CI PIPELINE FAILED!'
+                            echo "Branch: ${env.BRANCH_NAME}"
+                            echo "Validation passed but CI pipeline (Docker build or Deploy) failed"
+                        }
+                    }
                 }
             }
         }
