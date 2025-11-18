@@ -64,64 +64,64 @@ spec:
                     env.IS_PR = env.CHANGE_ID ? 'true' : 'false'
                     env.BUILD_TYPE = env.CHANGE_ID ? 'Pull Request' : 'Push'
                     
-                    // Detect if this build was triggered by a PR close event
-                    // Check GitHub webhook cause for PR actions
+                    // Check if this is main/master branch - these should always run CI (unless it's a PR build)
+                    def isMainBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master'
+                    
+                    // Only check for PR close events on non-main branches
+                    // Main/master branches should always run CI when it's a push event (not PR)
                     def isPRCloseEvent = false
                     def prAction = null
                     
-                    try {
-                        // Check for GitHubPullRequestCause (for PR builds)
-                        def prCause = currentBuild.rawBuild.getCause(
-                            org.jenkinsci.plugins.github_branch_source.GitHubPullRequestCause
-                        )
-                        
-                        if (prCause) {
-                            prAction = prCause.action
-                            echo "PR Cause detected - Action: ${prAction}"
+                    if (!isMainBranch) {
+                        // Only check for PR close events on non-main branches (like develop)
+                        try {
+                            // Check for GitHubPullRequestCause (for PR builds)
+                            def prCause = currentBuild.rawBuild.getCause(
+                                org.jenkinsci.plugins.github_branch_source.GitHubPullRequestCause
+                            )
                             
-                            // Skip closed/edited PRs
-                            if (prAction in ['closed', 'edited']) {
-                                isPRCloseEvent = true
-                                echo "⚠️  Detected PR ${prAction} event - CI will be skipped"
-                            }
-                        } else {
-                            // For branch builds, check all causes to see if triggered by PR close
-                            def causes = currentBuild.rawBuild.getCauses()
-                            for (def cause : causes) {
-                                def causeClass = cause.getClass().getSimpleName()
-                                echo "Build cause: ${causeClass}"
+                            if (prCause) {
+                                prAction = prCause.action
+                                echo "PR Cause detected - Action: ${prAction}"
                                 
-                                if (causeClass == 'GitHubPullRequestCause') {
-                                    prAction = cause.action
-                                    echo "PR Cause found in branch build - Action: ${prAction}"
-                                    if (prAction in ['closed', 'edited']) {
-                                        isPRCloseEvent = true
-                                        echo "⚠️  Branch build triggered by PR ${prAction} event - CI will be skipped"
-                                        break
+                                // Skip closed/edited PRs on non-main branches
+                                if (prAction in ['closed', 'edited']) {
+                                    isPRCloseEvent = true
+                                    echo "⚠️  Detected PR ${prAction} event - CI will be skipped"
+                                }
+                            } else {
+                                // For branch builds, check all causes to see if triggered by PR close
+                                def causes = currentBuild.rawBuild.getCauses()
+                                for (def cause : causes) {
+                                    def causeClass = cause.getClass().getSimpleName()
+                                    echo "Build cause: ${causeClass}"
+                                    
+                                    if (causeClass == 'GitHubPullRequestCause') {
+                                        prAction = cause.action
+                                        echo "PR Cause found in branch build - Action: ${prAction}"
+                                        if (prAction in ['closed', 'edited']) {
+                                            isPRCloseEvent = true
+                                            echo "⚠️  Branch build triggered by PR ${prAction} event - CI will be skipped"
+                                            break
+                                        }
                                     }
                                 }
+                                
+                                // Also check build description for PR close indicators (but not merge)
+                                def buildDescription = currentBuild.description ?: ''
+                                
+                                // Only skip if it's explicitly a PR close (not merge)
+                                if (buildDescription.contains('Pull request') && 
+                                    buildDescription.contains('closed') && 
+                                    !buildDescription.contains('merged')) {
+                                    isPRCloseEvent = true
+                                    echo "⚠️  Build description indicates PR close event (not merge) - CI will be skipped"
+                                }
                             }
+                        } catch (Exception e) {
+                            echo "Could not check PR cause: ${e.message}"
                             
-                            // Also check build description for PR close indicators (but not merge)
-                            def buildDescription = currentBuild.description ?: ''
-                            def isMainBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master'
-                            
-                            // Only skip if it's explicitly a PR close (not merge) on non-main branches
-                            if (buildDescription.contains('Pull request') && 
-                                buildDescription.contains('closed') && 
-                                !buildDescription.contains('merged') &&
-                                !isMainBranch) {
-                                isPRCloseEvent = true
-                                echo "⚠️  Build description indicates PR close event (not merge) - CI will be skipped"
-                            }
-                        }
-                    } catch (Exception e) {
-                        echo "Could not check PR cause: ${e.message}"
-                        echo "Stack trace: ${e.getStackTrace().take(5).join('\n')}"
-                        
-                        // Fallback: check commit message, but only skip on non-main branches
-                        def isMainBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master'
-                        if (!isMainBranch) {
+                            // Fallback: check commit message for close (not merge) patterns
                             def commitMsg = sh(
                                 script: 'git log -1 --pretty=%B',
                                 returnStdout: true
@@ -136,36 +136,23 @@ spec:
                                 }
                             }
                         }
-                    }
-                    
-                    env.IS_PR_CLOSE_EVENT = isPRCloseEvent ? 'true' : 'false'
-                    
-                    // Only skip PR close events on non-main branches
-                    // When PR is merged to main, it's a push event to main and should run CI
-                    def isMainBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master'
-                    
-                    // If PR close event detected on non-main branch, stop the build immediately
-                    if (isPRCloseEvent && !isMainBranch) {
-                        echo '🚫 PR CLOSE EVENT DETECTED - STOPPING BUILD'
-                        echo '================================'
-                        echo "Branch: ${env.BRANCH_NAME}"
-                        if (prAction) {
-                            echo "PR Action: ${prAction}"
+                        
+                        // If PR close event detected on non-main branch, stop the build immediately
+                        if (isPRCloseEvent) {
+                            echo '🚫 PR CLOSE EVENT DETECTED - STOPPING BUILD'
+                            echo '================================'
+                            echo "Branch: ${env.BRANCH_NAME}"
+                            if (prAction) {
+                                echo "PR Action: ${prAction}"
+                            }
+                            echo "This build was triggered by a PR close event on a non-main branch."
+                            echo "Skipping pipeline execution to prevent unnecessary CI runs."
+                            echo '================================'
+                            currentBuild.result = 'NOT_BUILT'
+                            error("Build skipped: PR close event detected on non-main branch")
                         }
-                        echo "This build was triggered by a PR close event on a non-main branch."
-                        echo "Skipping pipeline execution to prevent unnecessary CI runs."
-                        echo "Note: PR merges to main/master will run CI normally."
-                        echo '================================'
-                        currentBuild.result = 'NOT_BUILT'
-                        error("Build skipped: PR close event detected on non-main branch")
-                    } else if (isPRCloseEvent && isMainBranch) {
-                        echo 'ℹ️  PR merge detected on main branch - CI will run normally'
-                        echo "Branch: ${env.BRANCH_NAME}"
-                        if (prAction) {
-                            echo "PR Action: ${prAction}"
-                        }
-                        // Reset the flag so CI stages can run
-                        env.IS_PR_CLOSE_EVENT = 'false'
+                    } else {
+                        echo "ℹ️  Main/master branch detected - CI will run normally for push events"
                     }
                     
                     echo '📥 Checking out source code...'
