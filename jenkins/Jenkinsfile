@@ -74,17 +74,12 @@ spec:
                         env.BUILD_TYPE = 'Push'
                     }
                     
-                    echo '📥 Checking out source code...'
-                    echo "Build Type: ${env.BUILD_TYPE}"
                     if (env.CHANGE_ID) {
-                        echo "PR Number: ${env.CHANGE_ID}"
-                        echo "Source Branch: ${env.BRANCH_NAME}"
-                        echo "Target Branch: ${env.CHANGE_TARGET}"
+                        echo "Checkout: Pull Request #${env.CHANGE_ID} (${env.BRANCH_NAME} -> ${env.CHANGE_TARGET})"
                     } else if (env.TAG_NAME) {
-                        echo "Tag: ${env.TAG_NAME}"
-                        echo "Image will be tagged with: ${env.TAG_NAME}"
+                        echo "Checkout: Tag ${env.TAG_NAME} (Image: ${FULL_IMAGE})"
                     } else {
-                        echo "Branch: ${env.BRANCH_NAME}"
+                        echo "Checkout: Branch ${env.BRANCH_NAME}"
                     }
                 }
             }
@@ -93,7 +88,7 @@ spec:
         stage('Build') {
             steps {
                 container('maven') {
-                    echo '🔨 Building application...'
+                    echo 'Building application...'
                     sh 'mvn --version'
                     sh 'mvn clean compile'
                 }
@@ -105,7 +100,7 @@ spec:
                 stage('Test') {
                     steps {
                         container('maven') {
-                            echo '🧪 Running tests...'
+                            echo 'Running tests...'
                             sh 'mvn test'
                         }
                     }
@@ -119,7 +114,7 @@ spec:
                 stage('Package') {
                     steps {
                         container('maven') {
-                            echo '📦 Packaging application...'
+                            echo 'Packaging application...'
                             sh 'mvn package -DskipTests'
                         }
                     }
@@ -141,8 +136,7 @@ spec:
             }
             steps {
                 container('kaniko') {
-                    echo "🐳 Building and pushing image with Kaniko..."
-                    echo "Image: ${FULL_IMAGE}"
+                    echo "Building and pushing Docker image: ${FULL_IMAGE}"
                     sh """
                         /kaniko/executor \
                             --context=\${WORKSPACE} \
@@ -166,12 +160,10 @@ spec:
             steps {
                 script {
                     def deployMessage = """
-                    ⚠️  DEPLOYMENT APPROVAL REQUIRED
-                    ================================
-                    Branch/Tag: ${env.TAG_NAME ?: env.BRANCH_NAME}
+                    DEPLOYMENT APPROVAL REQUIRED
+                    Tag: ${env.TAG_NAME}
                     Image: ${FULL_IMAGE}
                     Target: Kubernetes (${APP_DOMAIN})
-                    ================================
                     Please review and approve this deployment.
                     """
                     
@@ -194,8 +186,7 @@ spec:
                         error("Deployment was skipped by ${env.approvedBy}")
                     }
                     
-                    echo "✅ Deployment approved by: ${env.approvedBy}"
-                    echo "Action selected: ${approvalResult}"
+                    echo "Deployment approved by ${env.approvedBy}: ${approvalResult}"
                 }
             }
         }
@@ -214,8 +205,7 @@ spec:
             }
             steps {
                 container('kubectl') {
-                    echo "🚀 Deploying to Kubernetes..."
-                    echo "Using image: ${FULL_IMAGE}"
+                    echo "Deploying to Kubernetes with image: ${FULL_IMAGE}"
                     script {
                         def deploymentYaml = readFile('k8s-deployment.yaml')
                         deploymentYaml = deploymentYaml.replace('IMAGE_URL_PLACEHOLDER', env.FULL_IMAGE)
@@ -241,41 +231,17 @@ spec:
         success {
             script {
                 if (env.CHANGE_ID) {
-                    echo '✅ PULL REQUEST VALIDATION SUCCESSFUL!'
-                    echo '================================'
-                    echo "PR Number: ${env.CHANGE_ID}"
-                    echo "Validation completed successfully"
-                    echo "CI pipeline (Docker build & Deploy) will run after PR merge"
-                    echo '================================'
+                    echo "Pull Request #${env.CHANGE_ID} validation successful - CI pipeline will run after merge"
                 } else {
-                    script {
-                        def isDeployableBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'develop'
-                        def isTagBuild = env.TAG_NAME != null
-                        
-                        if (isTagBuild) {
-                            echo '✅ TAG BUILD & CI PIPELINE SUCCESSFUL!'
-                            echo '================================'
-                            echo "Tag: ${env.TAG_NAME}"
-                            echo "Validation passed - CI pipeline completed"
-                            echo "Image: ${FULL_IMAGE}"
-                            echo "Application URL: https://${APP_DOMAIN}"
-                            echo '================================'
-                        } else if (isDeployableBranch) {
-                            echo '✅ VALIDATION & CI PIPELINE SUCCESSFUL!'
-                            echo '================================'
-                            echo "Branch: ${env.BRANCH_NAME}"
-                            echo "Validation passed - CI pipeline completed"
-                            echo "Image: ${FULL_IMAGE}"
-                            echo "Application URL: https://${APP_DOMAIN}"
-                            echo '================================'
-                        } else {
-                            echo '✅ VALIDATION SUCCESSFUL!'
-                            echo '================================'
-                            echo "Branch: ${env.BRANCH_NAME}"
-                            echo "Validation completed successfully"
-                            echo "CI pipeline (Docker build & Deploy) skipped for this branch"
-                            echo '================================'
-                        }
+                    def isDeployableBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'develop'
+                    def isTagBuild = env.TAG_NAME != null
+                    
+                    if (isTagBuild) {
+                        echo "Tag ${env.TAG_NAME} build and deployment successful - Image: ${FULL_IMAGE} - URL: https://${APP_DOMAIN}"
+                    } else if (isDeployableBranch) {
+                        echo "Branch ${env.BRANCH_NAME} validation and deployment successful - Image: ${FULL_IMAGE} - URL: https://${APP_DOMAIN}"
+                    } else {
+                        echo "Branch ${env.BRANCH_NAME} validation successful - CI pipeline skipped for this branch"
                     }
                 }
             }
@@ -283,33 +249,23 @@ spec:
         failure {
             script {
                 if (env.CHANGE_ID) {
-                    echo '❌ PULL REQUEST VALIDATION FAILED!'
-                    echo "PR Number: ${env.CHANGE_ID}"
-                    echo "Validation failed - CI pipeline will not run"
+                    echo "Pull Request #${env.CHANGE_ID} validation failed - CI pipeline will not run"
                 } else {
-                    script {
-                        def validationFailed = currentBuild.result == 'FAILURE'
-                        if (validationFailed && currentBuild.stageName?.contains('Validation')) {
-                            echo '❌ VALIDATION FAILED!'
-                            echo "Branch: ${env.BRANCH_NAME}"
-                            echo "Validation failed - CI pipeline was not executed"
-                        } else {
-                            echo '❌ CI PIPELINE FAILED!'
-                            echo "Branch: ${env.BRANCH_NAME}"
-                            echo "Validation passed but CI pipeline (Docker build or Deploy) failed"
-                        }
+                    def validationFailed = currentBuild.result == 'FAILURE'
+                    if (validationFailed && currentBuild.stageName?.contains('Validation')) {
+                        echo "Branch ${env.BRANCH_NAME} validation failed - CI pipeline was not executed"
+                    } else {
+                        echo "Branch ${env.BRANCH_NAME} CI pipeline failed (Docker build or Deploy)"
                     }
                 }
             }
         }
         always {
             script {
-                echo '🧹 Pipeline finished'
-                // Archive artifacts if available (may fail if workspace is not accessible)
                 try {
                     archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
                 } catch (Exception e) {
-                    echo "⚠️  Could not archive artifacts (workspace may not be available): ${e.message}"
+                    echo "Could not archive artifacts: ${e.message}"
                 }
             }
         }
