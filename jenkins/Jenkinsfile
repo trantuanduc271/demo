@@ -51,7 +51,8 @@ spec:
         GCP_REGION = 'us-central1'
         IMAGE_REPO = "${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/my-java-app"
         IMAGE_NAME = 'my-app'
-        IMAGE_TAG = "${BUILD_NUMBER}"
+        // Use tag name if available, otherwise use build number
+        IMAGE_TAG = "${env.TAG_NAME ?: BUILD_NUMBER}"
         FULL_IMAGE = "${IMAGE_REPO}/${IMAGE_NAME}:${IMAGE_TAG}"
         APP_DOMAIN = 'app.ducttdevops.com'
     }
@@ -62,60 +63,16 @@ spec:
                 script {
                     checkout scm
                     env.IS_PR = env.CHANGE_ID ? 'true' : 'false'
-                    env.BUILD_TYPE = env.CHANGE_ID ? 'Pull Request' : 'Push'
+                    env.IS_TAG = env.TAG_NAME ? 'true' : 'false'
                     
-                    // Detect if this build was triggered by a PR close event
-                    // Check GitHub webhook cause for PR actions
-                    def isPRCloseEvent = false
-                    def prAction = null
-                    
-                    try {
-                        // Check for GitHubPullRequestCause (for PR builds)
-                        def prCause = currentBuild.rawBuild.getCause(
-                            org.jenkinsci.plugins.github_branch_source.GitHubPullRequestCause
-                        )
-                        
-                        if (prCause) {
-                            prAction = prCause.action
-                            echo "PR Cause detected - Action: ${prAction}"
-                            
-                            // Skip closed/edited PRs
-                            if (prAction in ['closed', 'edited']) {
-                                isPRCloseEvent = true
-                                echo "⚠️  Detected PR ${prAction} event - CI will be skipped"
-                            }
-                        } else {
-                            // For branch builds, check all causes to see if triggered by PR close
-                            def causes = currentBuild.rawBuild.getCauses()
-                            for (def cause : causes) {
-                                if (cause.class.simpleName == 'GitHubPullRequestCause') {
-                                    prAction = cause.action
-                                    if (prAction in ['closed', 'edited']) {
-                                        isPRCloseEvent = true
-                                        echo "⚠️  Branch build triggered by PR ${prAction} event - CI will be skipped"
-                                        break
-                                    }
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        echo "Could not check PR cause: ${e.message}"
-                        // Fallback: check commit message for merge patterns
-                        def commitMsg = sh(
-                            script: 'git log -1 --pretty=%B',
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (commitMsg) {
-                            def mergePattern = ~/(?i)merge\s+pull\s+request\s+#\d+/
-                            if (commitMsg =~ mergePattern) {
-                                isPRCloseEvent = true
-                                echo "⚠️  Detected merge commit - CI will be skipped"
-                            }
-                        }
+                    // Determine build type
+                    if (env.CHANGE_ID) {
+                        env.BUILD_TYPE = 'Pull Request'
+                    } else if (env.TAG_NAME) {
+                        env.BUILD_TYPE = 'Tag'
+                    } else {
+                        env.BUILD_TYPE = 'Push'
                     }
-                    
-                    env.IS_PR_CLOSE_EVENT = isPRCloseEvent ? 'true' : 'false'
                     
                     echo '📥 Checking out source code...'
                     echo "Build Type: ${env.BUILD_TYPE}"
@@ -123,14 +80,11 @@ spec:
                         echo "PR Number: ${env.CHANGE_ID}"
                         echo "Source Branch: ${env.BRANCH_NAME}"
                         echo "Target Branch: ${env.CHANGE_TARGET}"
-                        if (prAction) {
-                            echo "PR Action: ${prAction}"
-                        }
+                    } else if (env.TAG_NAME) {
+                        echo "Tag: ${env.TAG_NAME}"
+                        echo "Image will be tagged with: ${env.TAG_NAME}"
                     } else {
                         echo "Branch: ${env.BRANCH_NAME}"
-                        if (isPRCloseEvent) {
-                            echo "⚠️  PR close/merge event detected - CI will be skipped"
-                        }
                     }
                 }
             }
@@ -177,11 +131,11 @@ spec:
             when {
                 allOf {
                     expression { return env.CHANGE_ID == null }
-                    expression { return env.IS_PR_CLOSE_EVENT != 'true' }
                     anyOf {
                         branch 'main'
                         branch 'master'
                         branch 'develop'
+                        expression { return env.TAG_NAME != null }
                     }
                 }
             }
@@ -202,15 +156,64 @@ spec:
             }
         }
         
-        stage('Deploy to Kubernetes') {
+        stage('Approve Deployment') {
             when {
                 allOf {
                     expression { return env.CHANGE_ID == null }
-                    expression { return env.IS_PR_CLOSE_EVENT != 'true' }
                     anyOf {
                         branch 'main'
                         branch 'master'
                         branch 'develop'
+                        expression { return env.TAG_NAME != null }
+                    }
+                }
+            }
+            steps {
+                script {
+                    def deployMessage = """
+                    ⚠️  DEPLOYMENT APPROVAL REQUIRED
+                    ================================
+                    Branch/Tag: ${env.TAG_NAME ?: env.BRANCH_NAME}
+                    Image: ${FULL_IMAGE}
+                    Target: Kubernetes (${APP_DOMAIN})
+                    ================================
+                    Please review and approve this deployment.
+                    """
+                    
+                    def approvalResult = input(
+                        id: 'deploymentApproval',
+                        message: deployMessage,
+                        ok: 'Approve Deployment',
+                        submitterParameter: 'approvedBy',
+                        parameters: [
+                            choice(
+                                name: 'action',
+                                choices: ['Deploy', 'Skip'],
+                                description: 'Choose deployment action'
+                            )
+                        ]
+                    )
+                    
+                    if (approvalResult == 'Skip') {
+                        currentBuild.result = 'ABORTED'
+                        error("Deployment was skipped by ${env.approvedBy}")
+                    }
+                    
+                    echo "✅ Deployment approved by: ${env.approvedBy}"
+                    echo "Action selected: ${approvalResult}"
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            when {
+                allOf {
+                    expression { return env.CHANGE_ID == null }
+                    anyOf {
+                        branch 'main'
+                        branch 'master'
+                        branch 'develop'
+                        expression { return env.TAG_NAME != null }
                     }
                 }
             }
@@ -252,15 +255,15 @@ spec:
                 } else {
                     script {
                         def isDeployableBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'develop'
-                        def isPRClose = env.IS_PR_CLOSE_EVENT == 'true'
+                        def isTagBuild = env.TAG_NAME != null
                         
-                        if (isPRClose) {
-                            echo '✅ VALIDATION SUCCESSFUL!'
+                        if (isTagBuild) {
+                            echo '✅ TAG BUILD & CI PIPELINE SUCCESSFUL!'
                             echo '================================'
-                            echo "Branch: ${env.BRANCH_NAME}"
-                            echo "Validation completed successfully"
-                            echo "⚠️  CI pipeline skipped - detected PR close/merge event"
-                            echo "This prevents CI from running when PRs are closed"
+                            echo "Tag: ${env.TAG_NAME}"
+                            echo "Validation passed - CI pipeline completed"
+                            echo "Image: ${FULL_IMAGE}"
+                            echo "Application URL: https://${APP_DOMAIN}"
                             echo '================================'
                         } else if (isDeployableBranch) {
                             echo '✅ VALIDATION & CI PIPELINE SUCCESSFUL!'
@@ -305,8 +308,15 @@ spec:
             }
         }
         always {
-            echo '🧹 Pipeline finished'
-            archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
+            script {
+                echo '🧹 Pipeline finished'
+                // Archive artifacts if available (may fail if workspace is not accessible)
+                try {
+                    archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
+                } catch (Exception e) {
+                    echo "⚠️  Could not archive artifacts (workspace may not be available): ${e.message}"
+                }
+            }
         }
     }
 }
