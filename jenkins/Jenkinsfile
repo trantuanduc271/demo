@@ -88,8 +88,12 @@ spec:
                             // For branch builds, check all causes to see if triggered by PR close
                             def causes = currentBuild.rawBuild.getCauses()
                             for (def cause : causes) {
-                                if (cause.class.simpleName == 'GitHubPullRequestCause') {
+                                def causeClass = cause.getClass().getSimpleName()
+                                echo "Build cause: ${causeClass}"
+                                
+                                if (causeClass == 'GitHubPullRequestCause') {
                                     prAction = cause.action
+                                    echo "PR Cause found in branch build - Action: ${prAction}"
                                     if (prAction in ['closed', 'edited']) {
                                         isPRCloseEvent = true
                                         echo "⚠️  Branch build triggered by PR ${prAction} event - CI will be skipped"
@@ -97,25 +101,72 @@ spec:
                                     }
                                 }
                             }
+                            
+                            // Also check build description for PR close indicators (but not merge)
+                            def buildDescription = currentBuild.description ?: ''
+                            def isMainBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master'
+                            
+                            // Only skip if it's explicitly a PR close (not merge) on non-main branches
+                            if (buildDescription.contains('Pull request') && 
+                                buildDescription.contains('closed') && 
+                                !buildDescription.contains('merged') &&
+                                !isMainBranch) {
+                                isPRCloseEvent = true
+                                echo "⚠️  Build description indicates PR close event (not merge) - CI will be skipped"
+                            }
                         }
                     } catch (Exception e) {
                         echo "Could not check PR cause: ${e.message}"
-                        // Fallback: check commit message for merge patterns
-                        def commitMsg = sh(
-                            script: 'git log -1 --pretty=%B',
-                            returnStdout: true
-                        ).trim()
+                        echo "Stack trace: ${e.getStackTrace().take(5).join('\n')}"
                         
-                        if (commitMsg) {
-                            def mergePattern = ~/(?i)merge\s+pull\s+request\s+#\d+/
-                            if (commitMsg =~ mergePattern) {
-                                isPRCloseEvent = true
-                                echo "⚠️  Detected merge commit - CI will be skipped"
+                        // Fallback: check commit message, but only skip on non-main branches
+                        def isMainBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master'
+                        if (!isMainBranch) {
+                            def commitMsg = sh(
+                                script: 'git log -1 --pretty=%B',
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (commitMsg) {
+                                // Only skip if it's a close (not merge) pattern
+                                def closePattern = ~/(?i)(close|closed)\s+#\d+/
+                                if (commitMsg =~ closePattern && !commitMsg.matches(/(?i).*merge.*pull.*request.*/)) {
+                                    isPRCloseEvent = true
+                                    echo "⚠️  Detected PR close commit (not merge) - CI will be skipped"
+                                }
                             }
                         }
                     }
                     
                     env.IS_PR_CLOSE_EVENT = isPRCloseEvent ? 'true' : 'false'
+                    
+                    // Only skip PR close events on non-main branches
+                    // When PR is merged to main, it's a push event to main and should run CI
+                    def isMainBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master'
+                    
+                    // If PR close event detected on non-main branch, stop the build immediately
+                    if (isPRCloseEvent && !isMainBranch) {
+                        echo '🚫 PR CLOSE EVENT DETECTED - STOPPING BUILD'
+                        echo '================================'
+                        echo "Branch: ${env.BRANCH_NAME}"
+                        if (prAction) {
+                            echo "PR Action: ${prAction}"
+                        }
+                        echo "This build was triggered by a PR close event on a non-main branch."
+                        echo "Skipping pipeline execution to prevent unnecessary CI runs."
+                        echo "Note: PR merges to main/master will run CI normally."
+                        echo '================================'
+                        currentBuild.result = 'NOT_BUILT'
+                        error("Build skipped: PR close event detected on non-main branch")
+                    } else if (isPRCloseEvent && isMainBranch) {
+                        echo 'ℹ️  PR merge detected on main branch - CI will run normally'
+                        echo "Branch: ${env.BRANCH_NAME}"
+                        if (prAction) {
+                            echo "PR Action: ${prAction}"
+                        }
+                        // Reset the flag so CI stages can run
+                        env.IS_PR_CLOSE_EVENT = 'false'
+                    }
                     
                     echo '📥 Checking out source code...'
                     echo "Build Type: ${env.BUILD_TYPE}"
@@ -128,9 +179,6 @@ spec:
                         }
                     } else {
                         echo "Branch: ${env.BRANCH_NAME}"
-                        if (isPRCloseEvent) {
-                            echo "⚠️  PR close/merge event detected - CI will be skipped"
-                        }
                     }
                 }
             }
@@ -177,7 +225,6 @@ spec:
             when {
                 allOf {
                     expression { return env.CHANGE_ID == null }
-                    expression { return env.IS_PR_CLOSE_EVENT != 'true' }
                     anyOf {
                         branch 'main'
                         branch 'master'
@@ -206,7 +253,6 @@ spec:
             when {
                 allOf {
                     expression { return env.CHANGE_ID == null }
-                    expression { return env.IS_PR_CLOSE_EVENT != 'true' }
                     anyOf {
                         branch 'main'
                         branch 'master'
@@ -252,17 +298,8 @@ spec:
                 } else {
                     script {
                         def isDeployableBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'develop'
-                        def isPRClose = env.IS_PR_CLOSE_EVENT == 'true'
                         
-                        if (isPRClose) {
-                            echo '✅ VALIDATION SUCCESSFUL!'
-                            echo '================================'
-                            echo "Branch: ${env.BRANCH_NAME}"
-                            echo "Validation completed successfully"
-                            echo "⚠️  CI pipeline skipped - detected PR close/merge event"
-                            echo "This prevents CI from running when PRs are closed"
-                            echo '================================'
-                        } else if (isDeployableBranch) {
+                        if (isDeployableBranch) {
                             echo '✅ VALIDATION & CI PIPELINE SUCCESSFUL!'
                             echo '================================'
                             echo "Branch: ${env.BRANCH_NAME}"
