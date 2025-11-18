@@ -77,7 +77,7 @@ spec:
             }
         }
         
-        stage('Build with Maven') {
+        stage('Build') {
             steps {
                 container('maven') {
                     echo '🔨 Building application...'
@@ -87,30 +87,37 @@ spec:
             }
         }
         
-        stage('Test') {
-            steps {
-                container('maven') {
-                    echo '🧪 Running tests...'
-                    sh 'mvn test'
+        stage('Validation') {
+            parallel {
+                stage('Test') {
+                    steps {
+                        container('maven') {
+                            echo '🧪 Running tests...'
+                            sh 'mvn test'
+                        }
+                    }
+                    post {
+                        always {
+                            junit 'target/surefire-reports/*.xml'
+                        }
+                    }
                 }
-            }
-            post {
-                always {
-                    junit 'target/surefire-reports/*.xml'
-                }
-            }
-        }
-        
-        stage('Package') {
-            steps {
-                container('maven') {
-                    echo '📦 Packaging application...'
-                    sh 'mvn package -DskipTests'
+                
+                stage('Package') {
+                    steps {
+                        container('maven') {
+                            echo '📦 Packaging application...'
+                            sh 'mvn package -DskipTests'
+                        }
+                    }
                 }
             }
         }
         
         stage('Build & Push Docker Image') {
+            when {
+                expression { return env.CHANGE_ID == null }
+            }
             steps {
                 container('kaniko') {
                     echo "🐳 Building and pushing image with Kaniko..."
@@ -161,15 +168,17 @@ spec:
         success {
             script {
                 if (env.CHANGE_ID) {
-                    echo '✅ PULL REQUEST BUILD SUCCESSFUL!'
+                    echo '✅ PULL REQUEST VALIDATION SUCCESSFUL!'
                     echo '================================'
                     echo "PR Number: ${env.CHANGE_ID}"
-                    echo "Image: ${FULL_IMAGE}"
+                    echo "Validation completed successfully"
+                    echo "CI pipeline (Docker build & Deploy) will run after PR merge"
                     echo '================================'
                 } else {
-                    echo '✅ BUILD & DEPLOYMENT SUCCESSFUL!'
+                    echo '✅ VALIDATION & CI PIPELINE SUCCESSFUL!'
                     echo '================================'
                     echo "Branch: ${env.BRANCH_NAME}"
+                    echo "Validation passed - CI pipeline completed"
                     echo "Image: ${FULL_IMAGE}"
                     echo "Application URL: https://${APP_DOMAIN}"
                     echo '================================'
@@ -179,11 +188,22 @@ spec:
         failure {
             script {
                 if (env.CHANGE_ID) {
-                    echo '❌ PULL REQUEST BUILD FAILED!'
+                    echo '❌ PULL REQUEST VALIDATION FAILED!'
                     echo "PR Number: ${env.CHANGE_ID}"
+                    echo "Validation failed - CI pipeline will not run"
                 } else {
-                    echo '❌ BUILD OR DEPLOYMENT FAILED!'
-                    echo "Branch: ${env.BRANCH_NAME}"
+                    script {
+                        def validationFailed = currentBuild.result == 'FAILURE'
+                        if (validationFailed && currentBuild.stageName?.contains('Validation')) {
+                            echo '❌ VALIDATION FAILED!'
+                            echo "Branch: ${env.BRANCH_NAME}"
+                            echo "Validation failed - CI pipeline was not executed"
+                        } else {
+                            echo '❌ CI PIPELINE FAILED!'
+                            echo "Branch: ${env.BRANCH_NAME}"
+                            echo "Validation passed but CI pipeline (Docker build or Deploy) failed"
+                        }
+                    }
                 }
             }
         }
