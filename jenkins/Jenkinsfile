@@ -116,7 +116,14 @@ spec:
         
         stage('Build & Push Docker Image') {
             when {
-                expression { return env.CHANGE_ID == null }
+                allOf {
+                    expression { return env.CHANGE_ID == null }
+                    anyOf {
+                        branch 'main'
+                        branch 'master'
+                        branch 'develop'
+                    }
+                }
             }
             steps {
                 container('kaniko') {
@@ -137,7 +144,14 @@ spec:
         
         stage('Deploy to Kubernetes') {
             when {
-                expression { return env.CHANGE_ID == null }
+                allOf {
+                    expression { return env.CHANGE_ID == null }
+                    anyOf {
+                        branch 'main'
+                        branch 'master'
+                        branch 'develop'
+                    }
+                }
             }
             steps {
                 container('kubectl') {
@@ -175,13 +189,25 @@ spec:
                     echo "CI pipeline (Docker build & Deploy) will run after PR merge"
                     echo '================================'
                 } else {
-                    echo '✅ VALIDATION & CI PIPELINE SUCCESSFUL!'
-                    echo '================================'
-                    echo "Branch: ${env.BRANCH_NAME}"
-                    echo "Validation passed - CI pipeline completed"
-                    echo "Image: ${FULL_IMAGE}"
-                    echo "Application URL: https://${APP_DOMAIN}"
-                    echo '================================'
+                    script {
+                        def isDeployableBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' || env.BRANCH_NAME == 'develop'
+                        if (isDeployableBranch) {
+                            echo '✅ VALIDATION & CI PIPELINE SUCCESSFUL!'
+                            echo '================================'
+                            echo "Branch: ${env.BRANCH_NAME}"
+                            echo "Validation passed - CI pipeline completed"
+                            echo "Image: ${FULL_IMAGE}"
+                            echo "Application URL: https://${APP_DOMAIN}"
+                            echo '================================'
+                        } else {
+                            echo '✅ VALIDATION SUCCESSFUL!'
+                            echo '================================'
+                            echo "Branch: ${env.BRANCH_NAME}"
+                            echo "Validation completed successfully"
+                            echo "CI pipeline (Docker build & Deploy) skipped for this branch"
+                            echo '================================'
+                        }
+                    }
                 }
             }
         }
