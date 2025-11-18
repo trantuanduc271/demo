@@ -64,106 +64,12 @@ spec:
                     env.IS_PR = env.CHANGE_ID ? 'true' : 'false'
                     env.BUILD_TYPE = env.CHANGE_ID ? 'Pull Request' : 'Push'
                     
-                    // Check if this is main/master branch - these should always run CI (unless it's a PR build)
-                    def isMainBranch = env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master'
-                    
-                    // Only check for PR close events on non-main branches
-                    // Main/master branches should always run CI when it's a push event (not PR)
-                    def isPRCloseEvent = false
-                    def prAction = null
-                    
-                    if (!isMainBranch) {
-                        // Only check for PR close events on non-main branches (like develop)
-                        try {
-                            // Check for GitHubPullRequestCause (for PR builds)
-                            def prCause = currentBuild.rawBuild.getCause(
-                                org.jenkinsci.plugins.github_branch_source.GitHubPullRequestCause
-                            )
-                            
-                            if (prCause) {
-                                prAction = prCause.action
-                                echo "PR Cause detected - Action: ${prAction}"
-                                
-                                // Skip closed/edited PRs on non-main branches
-                                if (prAction in ['closed', 'edited']) {
-                                    isPRCloseEvent = true
-                                    echo "⚠️  Detected PR ${prAction} event - CI will be skipped"
-                                }
-                            } else {
-                                // For branch builds, check all causes to see if triggered by PR close
-                                def causes = currentBuild.rawBuild.getCauses()
-                                for (def cause : causes) {
-                                    def causeClass = cause.getClass().getSimpleName()
-                                    echo "Build cause: ${causeClass}"
-                                    
-                                    if (causeClass == 'GitHubPullRequestCause') {
-                                        prAction = cause.action
-                                        echo "PR Cause found in branch build - Action: ${prAction}"
-                                        if (prAction in ['closed', 'edited']) {
-                                            isPRCloseEvent = true
-                                            echo "⚠️  Branch build triggered by PR ${prAction} event - CI will be skipped"
-                                            break
-                                        }
-                                    }
-                                }
-                                
-                                // Also check build description for PR close indicators (but not merge)
-                                def buildDescription = currentBuild.description ?: ''
-                                
-                                // Only skip if it's explicitly a PR close (not merge)
-                                if (buildDescription.contains('Pull request') && 
-                                    buildDescription.contains('closed') && 
-                                    !buildDescription.contains('merged')) {
-                                    isPRCloseEvent = true
-                                    echo "⚠️  Build description indicates PR close event (not merge) - CI will be skipped"
-                                }
-                            }
-                        } catch (Exception e) {
-                            echo "Could not check PR cause: ${e.message}"
-                            
-                            // Fallback: check commit message for close (not merge) patterns
-                            def commitMsg = sh(
-                                script: 'git log -1 --pretty=%B',
-                                returnStdout: true
-                            ).trim()
-                            
-                            if (commitMsg) {
-                                // Only skip if it's a close (not merge) pattern
-                                def closePattern = ~/(?i)(close|closed)\s+#\d+/
-                                if (commitMsg =~ closePattern && !commitMsg.matches(/(?i).*merge.*pull.*request.*/)) {
-                                    isPRCloseEvent = true
-                                    echo "⚠️  Detected PR close commit (not merge) - CI will be skipped"
-                                }
-                            }
-                        }
-                        
-                        // If PR close event detected on non-main branch, stop the build immediately
-                        if (isPRCloseEvent) {
-                            echo '🚫 PR CLOSE EVENT DETECTED - STOPPING BUILD'
-                            echo '================================'
-                            echo "Branch: ${env.BRANCH_NAME}"
-                            if (prAction) {
-                                echo "PR Action: ${prAction}"
-                            }
-                            echo "This build was triggered by a PR close event on a non-main branch."
-                            echo "Skipping pipeline execution to prevent unnecessary CI runs."
-                            echo '================================'
-                            currentBuild.result = 'NOT_BUILT'
-                            error("Build skipped: PR close event detected on non-main branch")
-                        }
-                    } else {
-                        echo "ℹ️  Main/master branch detected - CI will run normally for push events"
-                    }
-                    
                     echo '📥 Checking out source code...'
                     echo "Build Type: ${env.BUILD_TYPE}"
                     if (env.CHANGE_ID) {
                         echo "PR Number: ${env.CHANGE_ID}"
                         echo "Source Branch: ${env.BRANCH_NAME}"
                         echo "Target Branch: ${env.CHANGE_TARGET}"
-                        if (prAction) {
-                            echo "PR Action: ${prAction}"
-                        }
                     } else {
                         echo "Branch: ${env.BRANCH_NAME}"
                     }
