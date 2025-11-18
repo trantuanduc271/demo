@@ -77,7 +77,10 @@ spec:
             }
         }
         
-        stage('Build with Maven') {
+        stage('Build') {
+            when {
+                expression { return env.CHANGE_ID != null }
+            }
             steps {
                 container('maven') {
                     echo '🔨 Building application...'
@@ -87,25 +90,32 @@ spec:
             }
         }
         
-        stage('Test') {
-            steps {
-                container('maven') {
-                    echo '🧪 Running tests...'
-                    sh 'mvn test'
-                }
+        stage('PR Validation') {
+            when {
+                expression { return env.CHANGE_ID != null }
             }
-            post {
-                always {
-                    junit 'target/surefire-reports/*.xml'
+            parallel {
+                stage('Test') {
+                    steps {
+                        container('maven') {
+                            echo '🧪 Running tests...'
+                            sh 'mvn test'
+                        }
+                    }
+                    post {
+                        always {
+                            junit 'target/surefire-reports/*.xml'
+                        }
+                    }
                 }
-            }
-        }
-        
-        stage('Package') {
-            steps {
-                container('maven') {
-                    echo '📦 Packaging application...'
-                    sh 'mvn package -DskipTests'
+                
+                stage('Package') {
+                    steps {
+                        container('maven') {
+                            echo '📦 Packaging application...'
+                            sh 'mvn package -DskipTests'
+                        }
+                    }
                 }
             }
         }
@@ -164,10 +174,11 @@ spec:
         success {
             script {
                 if (env.CHANGE_ID) {
-                    echo '✅ PULL REQUEST BUILD SUCCESSFUL!'
+                    echo '✅ PULL REQUEST VALIDATION SUCCESSFUL!'
                     echo '================================'
                     echo "PR Number: ${env.CHANGE_ID}"
-                    echo "Build & Docker Image stages were skipped for PR"
+                    echo "Build, Test, and Package completed"
+                    echo "Docker Image and Deploy stages were skipped for PR"
                     echo '================================'
                 } else {
                     echo '✅ BUILD & DEPLOYMENT SUCCESSFUL!'
