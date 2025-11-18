@@ -160,12 +160,7 @@ spec:
             when {
                 allOf {
                     expression { return env.CHANGE_ID == null }
-                    anyOf {
-                        branch 'main'
-                        branch 'master'
-                        branch 'develop'
-                        expression { return env.TAG_NAME != null }
-                    }
+                    expression { return env.TAG_NAME != null }
                 }
             }
             steps {
