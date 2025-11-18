@@ -59,8 +59,21 @@ spec:
     stages {
         stage('Checkout') {
             steps {
-                echo '📥 Checking out source code...'
-                checkout scm
+                script {
+                    checkout scm
+                    env.IS_PR = env.CHANGE_ID ? 'true' : 'false'
+                    env.BUILD_TYPE = env.CHANGE_ID ? 'Pull Request' : 'Push'
+                    
+                    echo '📥 Checking out source code...'
+                    echo "Build Type: ${env.BUILD_TYPE}"
+                    if (env.CHANGE_ID) {
+                        echo "PR Number: ${env.CHANGE_ID}"
+                        echo "Source Branch: ${env.BRANCH_NAME}"
+                        echo "Target Branch: ${env.CHANGE_TARGET}"
+                    } else {
+                        echo "Branch: ${env.BRANCH_NAME}"
+                    }
+                }
             }
         }
         
@@ -116,6 +129,9 @@ spec:
         }
         
         stage('Deploy to Kubernetes') {
+            when {
+                expression { return env.CHANGE_ID == null }
+            }
             steps {
                 container('kubectl') {
                     echo "🚀 Deploying to Kubernetes..."
@@ -143,14 +159,33 @@ spec:
     
     post {
         success {
-            echo '✅ BUILD & DEPLOYMENT SUCCESSFUL!'
-            echo '================================'
-            echo "Image: ${FULL_IMAGE}"
-            echo "Application URL: https://${APP_DOMAIN}"
-            echo '================================'
+            script {
+                if (env.CHANGE_ID) {
+                    echo '✅ PULL REQUEST BUILD SUCCESSFUL!'
+                    echo '================================'
+                    echo "PR Number: ${env.CHANGE_ID}"
+                    echo "Image: ${FULL_IMAGE}"
+                    echo '================================'
+                } else {
+                    echo '✅ BUILD & DEPLOYMENT SUCCESSFUL!'
+                    echo '================================'
+                    echo "Branch: ${env.BRANCH_NAME}"
+                    echo "Image: ${FULL_IMAGE}"
+                    echo "Application URL: https://${APP_DOMAIN}"
+                    echo '================================'
+                }
+            }
         }
         failure {
-            echo '❌ BUILD OR DEPLOYMENT FAILED!'
+            script {
+                if (env.CHANGE_ID) {
+                    echo '❌ PULL REQUEST BUILD FAILED!'
+                    echo "PR Number: ${env.CHANGE_ID}"
+                } else {
+                    echo '❌ BUILD OR DEPLOYMENT FAILED!'
+                    echo "Branch: ${env.BRANCH_NAME}"
+                }
+            }
         }
         always {
             echo '🧹 Pipeline finished'
