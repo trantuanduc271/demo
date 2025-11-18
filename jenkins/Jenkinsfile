@@ -111,6 +111,9 @@ spec:
         }
         
         stage('Build & Push Docker Image') {
+            when {
+                expression { return env.CHANGE_ID == null }
+            }
             steps {
                 container('kaniko') {
                     echo "🐳 Building and pushing image with Kaniko..."
@@ -164,7 +167,7 @@ spec:
                     echo '✅ PULL REQUEST BUILD SUCCESSFUL!'
                     echo '================================'
                     echo "PR Number: ${env.CHANGE_ID}"
-                    echo "Image: ${FULL_IMAGE}"
+                    echo "Build & Docker Image stages were skipped for PR"
                     echo '================================'
                 } else {
                     echo '✅ BUILD & DEPLOYMENT SUCCESSFUL!'
