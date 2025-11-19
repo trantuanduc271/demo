@@ -82,10 +82,16 @@ import sys
 import os
 from pathlib import Path
 
-# Set up environment
-sys.path.insert(0, 'dags')
+# Set up environment BEFORE any imports
 os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
 os.environ['AIRFLOW__CORE__LOAD_EXAMPLES'] = 'False'
+
+# Import Airflow FIRST before adding dags to path
+from airflow import DAG
+print('✅ Airflow DAG class imported')
+
+# NOW add dags to path
+sys.path.insert(0, 'dags')
 
 # Hardcoded DAG file path
 dag_file = 'dags/sale_analytics.py'
@@ -104,10 +110,6 @@ try:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     print(f'✅ Module imported successfully: {module_name}')
-    
-    # Import Airflow DAG class
-    from airflow import DAG
-    print('✅ Airflow DAG class imported')
     
     # Find DAG objects in the module
     dag_found = False
@@ -131,16 +133,16 @@ try:
     if dag_found:
         print(f'✅ Found {len(found_dags)} DAG(s):')
         for dag_info in found_dags:
-            print(f'   - {dag_info.get(\"name\")}: dag_id={dag_info.get(\"dag_id\")}, tasks={dag_info.get(\"tasks\")}')
+            print(f'   - {dag_info[\"name\"]}: dag_id={dag_info[\"dag_id\"]}, tasks={dag_info[\"tasks\"]}')
         
         # Check if requested DAG ID matches
         if expected_dag_id:
-            matching = [d for d in found_dags if d.get('dag_id') == expected_dag_id]
+            matching = [d for d in found_dags if d['dag_id'] == expected_dag_id]
             if matching:
                 print(f'✅ Found matching DAG ID: {expected_dag_id}')
             else:
                 print(f'⚠️  Requested DAG ID {expected_dag_id} not found in file')
-                print(f'   Available DAG IDs: {[d.get(\"dag_id\") for d in found_dags]}')
+                print(f'   Available DAG IDs: {[d[\"dag_id\"] for d in found_dags]}')
     else:
         print('⚠️  No DAG objects found in file')
         print('   This might be OK if DAG is defined differently')
@@ -286,4 +288,3 @@ except requests.exceptions.RequestException as e:
         }
     }
 }
-
