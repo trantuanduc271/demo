@@ -50,8 +50,11 @@ spec:
                         echo "============================================================"
                         
                         sh """
-                            pip install apache-airflow==2.8.0 --quiet
-                            pip install apache-airflow-providers-postgres --quiet
+                            set -e
+                            
+                            # Install dependencies with constraint file
+                            pip install --upgrade pip --quiet
+                            pip install apache-airflow==2.8.0 apache-airflow-providers-postgres --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.8.0/constraints-3.11.txt" --quiet 2>&1 | grep -v WARNING || true
                             
                             # Test 1: Check DAG file exists
                             echo ""
@@ -77,123 +80,120 @@ spec:
                             echo "============================================================"
                             echo "TEST 3: Testing DAG import"
                             echo "============================================================"
-                            python -c "
+                            
+                            export AIRFLOW_HOME=/tmp/airflow
+                            export AIRFLOW__CORE__LOAD_EXAMPLES=False
+                            export AIRFLOW__CORE__UNIT_TEST_MODE=True
+                            
+                            python << 'PYTHON_SCRIPT'
 import sys
 import os
 from pathlib import Path
 
-# Set up environment BEFORE any imports
-os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
-os.environ['AIRFLOW__CORE__LOAD_EXAMPLES'] = 'False'
+# Verify airflow installation
+try:
+    import airflow
+    print(f"✅ Airflow version: {airflow.__version__}")
+    print(f"✅ Airflow location: {airflow.__file__}")
+except ImportError as e:
+    print(f"❌ Cannot import airflow: {e}")
+    sys.exit(1)
 
-# Import Airflow FIRST before adding dags to path
-from airflow import DAG
-print('✅ Airflow DAG class imported')
+# Import Airflow classes
+try:
+    from airflow import DAG
+    from airflow.models import DagBag
+    print("✅ Airflow DAG class imported")
+except ImportError as e:
+    print(f"❌ Cannot import DAG class: {e}")
+    sys.exit(1)
 
-# NOW add dags to path
-sys.path.insert(0, 'dags')
-
-# Hardcoded DAG file path
-dag_file = 'dags/sale_analytics.py'
-expected_dag_id = 'sales_analytics_pipeline'
+# Set DAG file path
+dag_file = "dags/sale_analytics.py"
+expected_dag_id = "sales_analytics_pipeline"
 
 try:
-    # Import the DAG file
-    import importlib.util
-    module_name = Path(dag_file).stem
-    spec = importlib.util.spec_from_file_location(module_name, dag_file)
+    # Use DagBag to load DAG
+    print(f"Loading DAG from: {os.path.abspath(dag_file)}")
     
-    if spec is None:
-        print(f'❌ Could not create module spec from file')
+    # Create a DagBag with the dags folder
+    dagbag = DagBag(dag_folder="dags", include_examples=False)
+    
+    if dagbag.import_errors:
+        print("❌ DAG import errors found:")
+        for filename, error in dagbag.import_errors.items():
+            print(f"   File: {filename}")
+            print(f"   Error: {error}")
         sys.exit(1)
     
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    print(f'✅ Module imported successfully: {module_name}')
+    print(f"✅ Module imported successfully")
     
-    # Find DAG objects in the module
-    dag_found = False
+    # Find DAG objects
+    if not dagbag.dags:
+        print("⚠️  No DAG objects found in file")
+        sys.exit(1)
+    
     found_dags = []
+    for dag_id, dag in dagbag.dags.items():
+        found_dags.append({
+            "name": dag_id,
+            "dag_id": dag.dag_id,
+            "tasks": len(dag.tasks)
+        })
     
-    for name in dir(module):
-        if name.startswith('_'):
-            continue
-        try:
-            obj = getattr(module, name)
-            if isinstance(obj, DAG):
-                dag_found = True
-                found_dags.append({
-                    'name': name,
-                    'dag_id': obj.dag_id,
-                    'tasks': len(obj.tasks)
-                })
-        except:
-            pass
+    print(f"✅ Found {len(found_dags)} DAG(s):")
+    for dag_info in found_dags:
+        print(f'   - {dag_info["name"]}: dag_id={dag_info["dag_id"]}, tasks={dag_info["tasks"]}')
     
-    if dag_found:
-        print(f'✅ Found {len(found_dags)} DAG(s):')
-        for dag_info in found_dags:
-            print(f'   - {dag_info[\"name\"]}: dag_id={dag_info[\"dag_id\"]}, tasks={dag_info[\"tasks\"]}')
-        
-        # Check if requested DAG ID matches
-        if expected_dag_id:
-            matching = [d for d in found_dags if d['dag_id'] == expected_dag_id]
-            if matching:
-                print(f'✅ Found matching DAG ID: {expected_dag_id}')
-            else:
-                print(f'⚠️  Requested DAG ID {expected_dag_id} not found in file')
-                print(f'   Available DAG IDs: {[d[\"dag_id\"] for d in found_dags]}')
-    else:
-        print('⚠️  No DAG objects found in file')
-        print('   This might be OK if DAG is defined differently')
-        sys.exit(1)
+    # Check if requested DAG ID matches
+    if expected_dag_id:
+        if expected_dag_id in dagbag.dags:
+            print(f"✅ Found matching DAG ID: {expected_dag_id}")
+            dag = dagbag.dags[expected_dag_id]
+            print(f"   Tasks: {', '.join([t.task_id for t in dag.tasks])}")
+        else:
+            print(f"⚠️  Requested DAG ID {expected_dag_id} not found")
+            print(f"   Available DAG IDs: {list(dagbag.dags.keys())}")
+            sys.exit(1)
     
     # Test 4: Validate DAG structure
-    print('')
-    print('============================================================')
-    print('TEST 4: Validating DAG structure')
-    print('============================================================')
+    print("")
+    print("============================================================")
+    print("TEST 4: Validating DAG structure")
+    print("============================================================")
     
-    with open(dag_file, 'r') as f:
+    with open(dag_file, "r") as f:
         content = f.read()
     
     checks = {
-        'has_dag_import': 'from airflow import DAG' in content or 'import airflow' in content,
-        'has_dag_definition': 'DAG(' in content or 'with DAG(' in content,
-        'has_tasks': 'Operator(' in content or 'PythonOperator' in content or 'PostgresOperator' in content,
+        "has_dag_import": "from airflow import DAG" in content or "import airflow" in content,
+        "has_dag_definition": "DAG(" in content or "with DAG(" in content,
+        "has_tasks": "Operator(" in content or "PythonOperator" in content or "PostgresOperator" in content,
     }
     
     all_passed = True
     for check_name, passed in checks.items():
-        status = '✅' if passed else '❌'
-        check_display = check_name.replace('_', ' ').title()
-        print(f'{status} {check_display}: {passed}')
+        status = "✅" if passed else "❌"
+        check_display = check_name.replace("_", " ").title()
+        print(f"{status} {check_display}: {passed}")
         if not passed:
             all_passed = False
     
     if not all_passed:
-        print('❌ DAG structure validation failed')
+        print("❌ DAG structure validation failed")
         sys.exit(1)
     
-    print('')
-    print('============================================================')
-    print('✅ All DAG tests passed!')
-    print('============================================================')
+    print("")
+    print("============================================================")
+    print("✅ All DAG tests passed!")
+    print("============================================================")
     
-except ModuleNotFoundError as e:
-    if 'airflow' in str(e).lower():
-        print(f'❌ Airflow not installed: {e}')
-        print('   This should not happen in Jenkins - Airflow should be installed')
-        sys.exit(1)
-    else:
-        print(f'❌ Missing module (not Airflow): {e}')
-        sys.exit(1)
 except Exception as e:
-    print(f'❌ DAG import failed: {e}')
+    print(f"❌ DAG validation failed: {e}")
     import traceback
     traceback.print_exc()
     sys.exit(1)
-"
+PYTHON_SCRIPT
                         """
                     }
                 }
