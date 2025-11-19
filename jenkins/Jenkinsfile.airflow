@@ -51,6 +51,7 @@ spec:
                         
                         sh """
                             pip install apache-airflow==2.8.0 --quiet
+                            pip install apache-airflow-providers-postgres --quiet
                             
                             # Test 1: Check DAG file exists
                             echo ""
