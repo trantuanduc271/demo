@@ -57,18 +57,44 @@ spec:
                             echo "============================================================"
                             echo "TEST 1: Checking if DAG file exists"
                             echo "============================================================"
-                            if [ ! -f "${DAGS_DIR}/${AIRFLOW_DAG_ID}.py" ]; then
-                                echo "❌ DAG file not found: ${DAGS_DIR}/${AIRFLOW_DAG_ID}.py"
+                            
+                            # Try to find DAG file - first by DAG ID name, then search for DAG ID in files
+                            DAG_FILE=""
+                            if [ -f "${DAGS_DIR}/${AIRFLOW_DAG_ID}.py" ]; then
+                                DAG_FILE="${DAGS_DIR}/${AIRFLOW_DAG_ID}.py"
+                            elif [ -f "${DAGS_DIR}/sale_analytics.py" ]; then
+                                # Check if this file contains the DAG ID
+                                if grep -q "'${AIRFLOW_DAG_ID}'" "${DAGS_DIR}/sale_analytics.py" || grep -q '"${AIRFLOW_DAG_ID}"' "${DAGS_DIR}/sale_analytics.py"; then
+                                    DAG_FILE="${DAGS_DIR}/sale_analytics.py"
+                                fi
+                            fi
+                            
+                            # If still not found, search all Python files in dags directory
+                            if [ -z "$DAG_FILE" ]; then
+                                for file in ${DAGS_DIR}/*.py; do
+                                    if [ -f "$file" ]; then
+                                        if grep -q "'${AIRFLOW_DAG_ID}'" "$file" || grep -q '"${AIRFLOW_DAG_ID}"' "$file"; then
+                                            DAG_FILE="$file"
+                                            break
+                                        fi
+                                    fi
+                                done
+                            fi
+                            
+                            if [ -z "$DAG_FILE" ]; then
+                                echo "❌ DAG file not found containing DAG ID: ${AIRFLOW_DAG_ID}"
+                                echo "   Searched in: ${DAGS_DIR}/"
                                 exit 1
                             fi
-                            echo "✅ DAG file exists: ${DAGS_DIR}/${AIRFLOW_DAG_ID}.py"
+                            
+                            echo "✅ DAG file found: ${DAG_FILE}"
                             
                             # Test 2: Validate Python syntax
                             echo ""
                             echo "============================================================"
                             echo "TEST 2: Validating Python syntax"
                             echo "============================================================"
-                            python -m py_compile ${DAGS_DIR}/${AIRFLOW_DAG_ID}.py
+                            python -m py_compile ${DAG_FILE}
                             echo "✅ Python syntax is valid"
                             
                             # Test 3: Test DAG import and structure
@@ -86,7 +112,7 @@ sys.path.insert(0, '${DAGS_DIR}')
 os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
 os.environ['AIRFLOW__CORE__LOAD_EXAMPLES'] = 'False'
 
-dag_file = '${DAGS_DIR}/${AIRFLOW_DAG_ID}.py'
+dag_file = '${DAG_FILE}'
 expected_dag_id = '${AIRFLOW_DAG_ID}'
 
 try:
