@@ -130,16 +130,16 @@ try:
     if dag_found:
         print(f'✅ Found {len(found_dags)} DAG(s):')
         for dag_info in found_dags:
-            print(f'   - {dag_info[\"name\"]}: dag_id=\"{dag_info[\"dag_id\"]}\", tasks={dag_info[\"tasks\"]}')
+            print(f'   - {dag_info.get(\"name\")}: dag_id={dag_info.get(\"dag_id\")}, tasks={dag_info.get(\"tasks\")}')
         
         # Check if requested DAG ID matches
         if expected_dag_id:
-            matching = [d for d in found_dags if d['dag_id'] == expected_dag_id]
+            matching = [d for d in found_dags if d.get('dag_id') == expected_dag_id]
             if matching:
                 print(f'✅ Found matching DAG ID: {expected_dag_id}')
             else:
-                print(f'⚠️  Requested DAG ID \"{expected_dag_id}\" not found in file')
-                print(f'   Available DAG IDs: {[d[\"dag_id\"] for d in found_dags]}')
+                print(f'⚠️  Requested DAG ID {expected_dag_id} not found in file')
+                print(f'   Available DAG IDs: {[d.get(\"dag_id\") for d in found_dags]}')
     else:
         print('⚠️  No DAG objects found in file')
         print('   This might be OK if DAG is defined differently')
@@ -163,7 +163,8 @@ try:
     all_passed = True
     for check_name, passed in checks.items():
         status = '✅' if passed else '❌'
-        print(f'{status} {check_name.replace(\"_\", \" \").title()}: {passed}')
+        check_display = check_name.replace('_', ' ').title()
+        print(f'{status} {check_display}: {passed}')
         if not passed:
             all_passed = False
     
