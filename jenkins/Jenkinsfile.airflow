@@ -1,0 +1,286 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    jenkins: agent
+spec:
+  serviceAccountName: jenkins
+  containers:
+  - name: python
+    image: python:3.11-slim
+    command:
+    - cat
+    tty: true
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+'''
+        }
+    }
+    
+    environment {
+        DAGS_DIR = 'dags'
+        AIRFLOW_URL = 'https://airflow.ducttdevops.com'
+        AIRFLOW_DAG_ID = "${env.AIRFLOW_DAG_ID ?: 'sales_analytics_pipeline'}"
+        AIRFLOW_USER = 'admin'
+        AIRFLOW_PASS = 'admin'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Test DAG') {
+            steps {
+                container('python') {
+                    script {
+                        echo "============================================================"
+                        echo "Testing DAG: ${AIRFLOW_DAG_ID}"
+                        echo "============================================================"
+                        
+                        sh """
+                            pip install apache-airflow==2.8.0 --quiet
+                            
+                            # Test 1: Check DAG file exists
+                            echo ""
+                            echo "============================================================"
+                            echo "TEST 1: Checking if DAG file exists"
+                            echo "============================================================"
+                            if [ ! -f "${DAGS_DIR}/${AIRFLOW_DAG_ID}.py" ]; then
+                                echo "❌ DAG file not found: ${DAGS_DIR}/${AIRFLOW_DAG_ID}.py"
+                                exit 1
+                            fi
+                            echo "✅ DAG file exists: ${DAGS_DIR}/${AIRFLOW_DAG_ID}.py"
+                            
+                            # Test 2: Validate Python syntax
+                            echo ""
+                            echo "============================================================"
+                            echo "TEST 2: Validating Python syntax"
+                            echo "============================================================"
+                            python -m py_compile ${DAGS_DIR}/${AIRFLOW_DAG_ID}.py
+                            echo "✅ Python syntax is valid"
+                            
+                            # Test 3: Test DAG import and structure
+                            echo ""
+                            echo "============================================================"
+                            echo "TEST 3: Testing DAG import"
+                            echo "============================================================"
+                            python -c "
+import sys
+import os
+from pathlib import Path
+
+# Set up environment
+sys.path.insert(0, '${DAGS_DIR}')
+os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
+os.environ['AIRFLOW__CORE__LOAD_EXAMPLES'] = 'False'
+
+dag_file = '${DAGS_DIR}/${AIRFLOW_DAG_ID}.py'
+expected_dag_id = '${AIRFLOW_DAG_ID}'
+
+try:
+    # Import the DAG file
+    import importlib.util
+    module_name = Path(dag_file).stem
+    spec = importlib.util.spec_from_file_location(module_name, dag_file)
+    
+    if spec is None:
+        print(f'❌ Could not create module spec from file')
+        sys.exit(1)
+    
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    print(f'✅ Module imported successfully: {module_name}')
+    
+    # Import Airflow DAG class
+    from airflow import DAG
+    print('✅ Airflow DAG class imported')
+    
+    # Find DAG objects in the module
+    dag_found = False
+    found_dags = []
+    
+    for name in dir(module):
+        if name.startswith('_'):
+            continue
+        try:
+            obj = getattr(module, name)
+            if isinstance(obj, DAG):
+                dag_found = True
+                found_dags.append({
+                    'name': name,
+                    'dag_id': obj.dag_id,
+                    'tasks': len(obj.tasks)
+                })
+        except:
+            pass
+    
+    if dag_found:
+        print(f'✅ Found {len(found_dags)} DAG(s):')
+        for dag_info in found_dags:
+            print(f'   - {dag_info[\"name\"]}: dag_id=\"{dag_info[\"dag_id\"]}\", tasks={dag_info[\"tasks\"]}')
+        
+        # Check if requested DAG ID matches
+        if expected_dag_id:
+            matching = [d for d in found_dags if d['dag_id'] == expected_dag_id]
+            if matching:
+                print(f'✅ Found matching DAG ID: {expected_dag_id}')
+            else:
+                print(f'⚠️  Requested DAG ID \"{expected_dag_id}\" not found in file')
+                print(f'   Available DAG IDs: {[d[\"dag_id\"] for d in found_dags]}')
+    else:
+        print('⚠️  No DAG objects found in file')
+        print('   This might be OK if DAG is defined differently')
+        sys.exit(1)
+    
+    # Test 4: Validate DAG structure
+    print('')
+    print('============================================================')
+    print('TEST 4: Validating DAG structure')
+    print('============================================================')
+    
+    with open(dag_file, 'r') as f:
+        content = f.read()
+    
+    checks = {
+        'has_dag_import': 'from airflow import DAG' in content or 'import airflow' in content,
+        'has_dag_definition': 'DAG(' in content or 'with DAG(' in content,
+        'has_tasks': 'Operator(' in content or 'PythonOperator' in content or 'PostgresOperator' in content,
+    }
+    
+    all_passed = True
+    for check_name, passed in checks.items():
+        status = '✅' if passed else '❌'
+        print(f'{status} {check_name.replace(\"_\", \" \").title()}: {passed}')
+        if not passed:
+            all_passed = False
+    
+    if not all_passed:
+        print('❌ DAG structure validation failed')
+        sys.exit(1)
+    
+    print('')
+    print('============================================================')
+    print('✅ All DAG tests passed!')
+    print('============================================================')
+    
+except ModuleNotFoundError as e:
+    if 'airflow' in str(e).lower():
+        print(f'❌ Airflow not installed: {e}')
+        print('   This should not happen in Jenkins - Airflow should be installed')
+        sys.exit(1)
+    else:
+        print(f'❌ Missing module (not Airflow): {e}')
+        sys.exit(1)
+except Exception as e:
+    print(f'❌ DAG import failed: {e}')
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+"
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Run Airflow DAG') {
+            when {
+                expression { return currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                container('python') {
+                    script {
+                        echo "🚀 Triggering Airflow DAG: ${AIRFLOW_DAG_ID}"
+                        
+                        sh """
+                            pip install requests --quiet
+                            
+                            python -c "
+import requests
+import json
+import base64
+import sys
+import os
+
+airflow_url = '${AIRFLOW_URL}'
+dag_id = '${AIRFLOW_DAG_ID}'
+username = '${AIRFLOW_USER}'
+password = '${AIRFLOW_PASS}'
+
+# Create auth header
+auth_string = f'{username}:{password}'
+auth_bytes = auth_string.encode('ascii')
+auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+
+# Trigger DAG
+trigger_url = f'{airflow_url}/api/v1/dags/{dag_id}/dagRuns'
+dag_run_id = f'jenkins_{os.environ.get(\"BUILD_NUMBER\", \"manual\")}_{int(__import__(\"time\").time())}'
+
+payload = {
+    'dag_run_id': dag_run_id,
+    'conf': {
+        'triggered_by': 'jenkins',
+        'build_number': os.environ.get('BUILD_NUMBER', 'unknown'),
+        'job_name': os.environ.get('JOB_NAME', 'unknown')
+    }
+}
+
+headers = {
+    'Authorization': f'Basic {auth_b64}',
+    'Content-Type': 'application/json'
+}
+
+try:
+    print(f'Triggering DAG: {dag_id}')
+    print(f'URL: {trigger_url}')
+    
+    response = requests.post(
+        trigger_url,
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+    
+    response.raise_for_status()
+    result = response.json()
+    
+    print(f'✅ DAG triggered successfully!')
+    print(f'   DAG Run ID: {result.get(\"dag_run_id\", dag_run_id)}')
+    print(f'   State: {result.get(\"state\", \"unknown\")}')
+    print(f'   View: {airflow_url}/dags/{dag_id}/grid?dag_run_id={result.get(\"dag_run_id\", dag_run_id)}')
+    
+except requests.exceptions.RequestException as e:
+    print(f'❌ Failed to trigger DAG: {e}')
+    if hasattr(e, 'response') and e.response is not None:
+        print(f'   Response: {e.response.text}')
+    sys.exit(1)
+"
+                        """
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "✅ DAG tested and triggered successfully!"
+        }
+        failure {
+            echo "❌ DAG test or trigger failed!"
+        }
+    }
+}
+
