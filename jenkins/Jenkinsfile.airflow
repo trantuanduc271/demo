@@ -218,6 +218,10 @@ import json
 import base64
 import sys
 import os
+import urllib3
+
+# Disable SSL warnings for self-signed certificates
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 airflow_url = '${AIRFLOW_URL}'
 dag_id = '${AIRFLOW_DAG_ID}'
@@ -255,7 +259,8 @@ try:
         trigger_url,
         headers=headers,
         json=payload,
-        timeout=30
+        timeout=30,
+        verify=False  # Disable SSL verification for self-signed certificates
     )
     
     response.raise_for_status()
