@@ -210,9 +210,9 @@ PYTHON_SCRIPT
                         echo "🚀 Triggering Airflow DAG: ${AIRFLOW_DAG_ID}"
                         
                         sh """
-                            pip install requests --quiet
+                            pip install requests --quiet 2>&1 | grep -v WARNING || true
                             
-                            python -c "
+                            python << 'PYTHON_SCRIPT'
 import requests
 import json
 import base64
@@ -231,7 +231,7 @@ auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
 
 # Trigger DAG
 trigger_url = f'{airflow_url}/api/v1/dags/{dag_id}/dagRuns'
-dag_run_id = f'jenkins_{os.environ.get(\"BUILD_NUMBER\", \"manual\")}_{int(__import__(\"time\").time())}'
+dag_run_id = f'jenkins_{os.environ.get("BUILD_NUMBER", "manual")}_{int(__import__("time").time())}'
 
 payload = {
     'dag_run_id': dag_run_id,
@@ -262,16 +262,16 @@ try:
     result = response.json()
     
     print(f'✅ DAG triggered successfully!')
-    print(f'   DAG Run ID: {result.get(\"dag_run_id\", dag_run_id)}')
-    print(f'   State: {result.get(\"state\", \"unknown\")}')
-    print(f'   View: {airflow_url}/dags/{dag_id}/grid?dag_run_id={result.get(\"dag_run_id\", dag_run_id)}')
+    print(f'   DAG Run ID: {result.get("dag_run_id", dag_run_id)}')
+    print(f'   State: {result.get("state", "unknown")}')
+    print(f'   View: {airflow_url}/dags/{dag_id}/grid?dag_run_id={result.get("dag_run_id", dag_run_id)}')
     
 except requests.exceptions.RequestException as e:
     print(f'❌ Failed to trigger DAG: {e}')
     if hasattr(e, 'response') and e.response is not None:
         print(f'   Response: {e.response.text}')
     sys.exit(1)
-"
+PYTHON_SCRIPT
                         """
                     }
                 }
