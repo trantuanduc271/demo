@@ -52,26 +52,23 @@ spec:
                         sh """
                             pip install apache-airflow==2.8.0 --quiet
                             
-                            # Hardcoded DAG file path
-                            DAG_FILE_PATH='dags/sale_analytics.py'
-                            
                             # Test 1: Check DAG file exists
                             echo ""
                             echo "============================================================"
                             echo "TEST 1: Checking if DAG file exists"
                             echo "============================================================"
-                            if [ ! -f "$DAG_FILE_PATH" ]; then
-                                echo "❌ DAG file not found: $DAG_FILE_PATH"
+                            if [ ! -f "dags/sale_analytics.py" ]; then
+                                echo "❌ DAG file not found: dags/sale_analytics.py"
                                 exit 1
                             fi
-                            echo "✅ DAG file found: $DAG_FILE_PATH"
+                            echo "✅ DAG file found: dags/sale_analytics.py"
                             
                             # Test 2: Validate Python syntax
                             echo ""
                             echo "============================================================"
                             echo "TEST 2: Validating Python syntax"
                             echo "============================================================"
-                            python -m py_compile "$DAG_FILE_PATH"
+                            python -m py_compile dags/sale_analytics.py
                             echo "✅ Python syntax is valid"
                             
                             # Test 3: Test DAG import and structure
