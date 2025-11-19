@@ -87,7 +87,7 @@ spec:
                                 exit 1
                             fi
                             
-                            echo "✅ DAG file found: ${DAG_FILE}"
+                            echo "✅ DAG file found: $DAG_FILE"
                             
                             # Export DAG_FILE for use in Python script
                             export DAG_FILE
@@ -97,7 +97,7 @@ spec:
                             echo "============================================================"
                             echo "TEST 2: Validating Python syntax"
                             echo "============================================================"
-                            python -m py_compile ${DAG_FILE}
+                            python -m py_compile "$DAG_FILE"
                             echo "✅ Python syntax is valid"
                             
                             # Test 3: Test DAG import and structure
