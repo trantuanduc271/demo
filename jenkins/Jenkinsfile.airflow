@@ -43,11 +43,9 @@ spec:
         
         stage('Test DAG') {
             steps {
-                container('python') {
+                container('python')                 {
                     script {
-                        echo "============================================================"
                         echo "Testing DAG: ${AIRFLOW_DAG_ID}"
-                        echo "============================================================"
                         
                         sh """
                             set -e
@@ -56,30 +54,21 @@ spec:
                             pip install --upgrade pip --quiet
                             pip install apache-airflow==2.8.0 apache-airflow-providers-postgres --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.8.0/constraints-3.11.txt" --quiet 2>&1 | grep -v WARNING || true
                             
-                            # Test 1: Check DAG file exists
                             echo ""
-                            echo "============================================================"
-                            echo "TEST 1: Checking if DAG file exists"
-                            echo "============================================================"
+                            echo "TEST 1: Check DAG file exists"
                             if [ ! -f "dags/sale_analytics.py" ]; then
-                                echo "❌ DAG file not found: dags/sale_analytics.py"
+                                echo "ERROR: DAG file not found"
                                 exit 1
                             fi
-                            echo "✅ DAG file found: dags/sale_analytics.py"
+                            echo "Found: dags/sale_analytics.py"
                             
-                            # Test 2: Validate Python syntax
                             echo ""
-                            echo "============================================================"
-                            echo "TEST 2: Validating Python syntax"
-                            echo "============================================================"
+                            echo "TEST 2: Validate Python syntax"
                             python -m py_compile dags/sale_analytics.py
-                            echo "✅ Python syntax is valid"
+                            echo "Python syntax valid"
                             
-                            # Test 3: Test DAG import and structure
                             echo ""
-                            echo "============================================================"
-                            echo "TEST 3: Testing DAG import"
-                            echo "============================================================"
+                            echo "TEST 3: Test DAG import"
                             
                             export AIRFLOW_HOME=/tmp/airflow
                             export AIRFLOW__CORE__LOAD_EXAMPLES=False
@@ -93,19 +82,18 @@ from pathlib import Path
 # Verify airflow installation
 try:
     import airflow
-    print(f"✅ Airflow version: {airflow.__version__}")
-    print(f"✅ Airflow location: {airflow.__file__}")
+    print(f"Airflow {airflow.__version__} loaded")
 except ImportError as e:
-    print(f"❌ Cannot import airflow: {e}")
+    print(f"ERROR: Cannot import airflow - {e}")
     sys.exit(1)
 
 # Import Airflow classes
 try:
     from airflow import DAG
     from airflow.models import DagBag
-    print("✅ Airflow DAG class imported")
+    print("Airflow DAG class imported")
 except ImportError as e:
-    print(f"❌ Cannot import DAG class: {e}")
+    print(f"ERROR: Cannot import DAG class - {e}")
     sys.exit(1)
 
 # Set DAG file path
@@ -120,17 +108,16 @@ try:
     dagbag = DagBag(dag_folder="dags", include_examples=False)
     
     if dagbag.import_errors:
-        print("❌ DAG import errors found:")
+        print("ERROR: DAG import failed")
         for filename, error in dagbag.import_errors.items():
-            print(f"   File: {filename}")
-            print(f"   Error: {error}")
+            print(f"  {filename}: {error}")
         sys.exit(1)
     
-    print(f"✅ Module imported successfully")
+    print(f"Module imported successfully")
     
     # Find DAG objects
     if not dagbag.dags:
-        print("⚠️  No DAG objects found in file")
+        print("ERROR: No DAG objects found")
         sys.exit(1)
     
     found_dags = []
@@ -141,26 +128,24 @@ try:
             "tasks": len(dag.tasks)
         })
     
-    print(f"✅ Found {len(found_dags)} DAG(s):")
+    print(f"Found {len(found_dags)} DAG(s):")
     for dag_info in found_dags:
-        print(f'   - {dag_info["name"]}: dag_id={dag_info["dag_id"]}, tasks={dag_info["tasks"]}')
+        print(f'  {dag_info["name"]} - {dag_info["tasks"]} tasks')
     
     # Check if requested DAG ID matches
     if expected_dag_id:
         if expected_dag_id in dagbag.dags:
-            print(f"✅ Found matching DAG ID: {expected_dag_id}")
+            print(f"Found target DAG: {expected_dag_id}")
             dag = dagbag.dags[expected_dag_id]
-            print(f"   Tasks: {', '.join([t.task_id for t in dag.tasks])}")
+            print(f"  Tasks: {', '.join([t.task_id for t in dag.tasks])}")
         else:
-            print(f"⚠️  Requested DAG ID {expected_dag_id} not found")
-            print(f"   Available DAG IDs: {list(dagbag.dags.keys())}")
+            print(f"ERROR: DAG {expected_dag_id} not found")
+            print(f"Available: {list(dagbag.dags.keys())}")
             sys.exit(1)
     
     # Test 4: Validate DAG structure
     print("")
-    print("============================================================")
-    print("TEST 4: Validating DAG structure")
-    print("============================================================")
+    print("TEST 4: Validate DAG structure")
     
     with open(dag_file, "r") as f:
         content = f.read()
@@ -173,23 +158,22 @@ try:
     
     all_passed = True
     for check_name, passed in checks.items():
-        status = "✅" if passed else "❌"
-        check_display = check_name.replace("_", " ").title()
-        print(f"{status} {check_display}: {passed}")
-        if not passed:
+        check_display = check_name.replace("_", " ").replace("has ", "")
+        if passed:
+            print(f"  {check_display}")
+        else:
+            print(f"  MISSING: {check_display}")
             all_passed = False
     
     if not all_passed:
-        print("❌ DAG structure validation failed")
+        print("ERROR: DAG structure validation failed")
         sys.exit(1)
     
     print("")
-    print("============================================================")
-    print("✅ All DAG tests passed!")
-    print("============================================================")
+    print("Validation complete")
     
 except Exception as e:
-    print(f"❌ DAG validation failed: {e}")
+    print(f"ERROR: DAG validation failed - {e}")
     import traceback
     traceback.print_exc()
     sys.exit(1)
@@ -205,9 +189,9 @@ PYTHON_SCRIPT
                 expression { return currentBuild.result == null || currentBuild.result == 'SUCCESS' }
             }
             steps {
-                container('python') {
+                container('python')                 {
                     script {
-                        echo "🚀 Triggering Airflow DAG: ${AIRFLOW_DAG_ID}"
+                        echo "Triggering DAG: ${AIRFLOW_DAG_ID}"
                         
                         sh """
                             pip install requests --quiet 2>&1 | grep -v WARNING || true
@@ -253,7 +237,7 @@ headers = {
 
 try:
     print(f'Triggering DAG: {dag_id}')
-    print(f'URL: {trigger_url}')
+    print(f'API URL: {trigger_url}')
     
     response = requests.post(
         trigger_url,
@@ -266,15 +250,15 @@ try:
     response.raise_for_status()
     result = response.json()
     
-    print(f'✅ DAG triggered successfully!')
-    print(f'   DAG Run ID: {result.get("dag_run_id", dag_run_id)}')
-    print(f'   State: {result.get("state", "unknown")}')
-    print(f'   View: {airflow_url}/dags/{dag_id}/grid?dag_run_id={result.get("dag_run_id", dag_run_id)}')
+    print(f'Triggered successfully')
+    print(f'Run ID: {result.get("dag_run_id", dag_run_id)}')
+    print(f'State: {result.get("state", "unknown")}')
+    print(f'View at: {airflow_url}/dags/{dag_id}/grid?dag_run_id={result.get("dag_run_id", dag_run_id)}')
     
 except requests.exceptions.RequestException as e:
-    print(f'❌ Failed to trigger DAG: {e}')
+    print(f'ERROR: Failed to trigger DAG - {e}')
     if hasattr(e, 'response') and e.response is not None:
-        print(f'   Response: {e.response.text}')
+        print(f'Response: {e.response.text}')
     sys.exit(1)
 PYTHON_SCRIPT
                         """
@@ -286,10 +270,10 @@ PYTHON_SCRIPT
     
     post {
         success {
-            echo "✅ DAG tested and triggered successfully!"
+            echo "DAG validation and trigger completed"
         }
         failure {
-            echo "❌ DAG test or trigger failed!"
+            echo "DAG validation or trigger failed"
         }
     }
 }
