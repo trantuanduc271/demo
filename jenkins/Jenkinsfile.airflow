@@ -89,6 +89,9 @@ spec:
                             
                             echo "✅ DAG file found: ${DAG_FILE}"
                             
+                            # Export DAG_FILE for use in Python script
+                            export DAG_FILE
+                            
                             # Test 2: Validate Python syntax
                             echo ""
                             echo "============================================================"
@@ -112,7 +115,12 @@ sys.path.insert(0, '${DAGS_DIR}')
 os.environ['AIRFLOW_HOME'] = '/tmp/airflow'
 os.environ['AIRFLOW__CORE__LOAD_EXAMPLES'] = 'False'
 
-dag_file = '${DAG_FILE}'
+# Get DAG file from environment variable set by shell
+dag_file = os.environ.get('DAG_FILE', '')
+if not dag_file:
+    # Fallback: try to construct from DAG ID
+    dag_file = '${DAGS_DIR}/${AIRFLOW_DAG_ID}.py'
+    
 expected_dag_id = '${AIRFLOW_DAG_ID}'
 
 try:
