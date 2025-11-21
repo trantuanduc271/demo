@@ -3,8 +3,8 @@ import pandas as pd
 from airflow.datasets import Dataset
 from airflow.decorators import task
 
-DATA_PATH = "/opt/airflow/data/training_data.csv"
-PROCESSED_DATA_PATH = "/opt/airflow/data/processed_training_data.csv"
+DATA_PATH = "/opt/airflow/dags/repo/data/training_data.csv"
+PROCESSED_DATA_PATH = "/opt/airflow/dags/repo/data/processed_training_data.csv"
 
 # Dataset outlet
 PREPROCESSED_DATASET = Dataset(PROCESSED_DATA_PATH)
