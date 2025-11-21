@@ -2,7 +2,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
 from datetime import datetime, timedelta
 from ml_pipeline_tasks.data import check_data_exists, preprocess_data
-from ml_pipeline_tasks.model import train_model, test_model, decide_deployment, deploy_model
+from ml_pipeline_tasks.model import train_model, test_model, decide_deployment, deploy_model, cleanup_old_models
 from ml_pipeline_tasks.utils import notify
 
 default_args = {"retries": 1, "retry_delay": timedelta(minutes=5)}
@@ -15,6 +15,7 @@ with DAG(
     default_args=default_args
 ) as dag:
 
+    t0 = PythonOperator(task_id="cleanup_old_models", python_callable=cleanup_old_models)
     t1 = PythonOperator(task_id="check_data", python_callable=check_data_exists)
     t2 = preprocess_data()
     t3 = PythonOperator(task_id="train_model", python_callable=train_model, provide_context=True)
@@ -23,6 +24,6 @@ with DAG(
     t6 = PythonOperator(task_id="deploy_model", python_callable=deploy_model)
     t7 = PythonOperator(task_id="notify_completion", python_callable=notify)
 
-    t1 >> t2 >> t3 >> t4 >> t5
+    t0 >> t1 >> t2 >> t3 >> t4 >> t5
     t5 >> [t6, t7]
     t6 >> t7

@@ -9,6 +9,17 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 MODEL_PATH = "/opt/airflow/dags/repo/models/model_latest.pkl"
 MIN_ACCURACY = 0.78
 
+def cleanup_old_models():
+    """Remove old model files to avoid version incompatibility issues"""
+    if os.path.exists(MODEL_PATH):
+        try:
+            os.remove(MODEL_PATH)
+            print(f"Removed old model file: {MODEL_PATH}")
+        except Exception as e:
+            print(f"Warning: Could not remove old model file: {e}")
+    else:
+        print("No existing model file to clean up")
+
 def train_model(**context):
     """Train RandomForest on processed data"""
     df = pd.read_csv(PROCESSED_DATA_PATH)
@@ -34,7 +45,16 @@ def test_model(**context):
     """Evaluate model"""
     from io import StringIO
     
-    model = joblib.load(MODEL_PATH)
+    # Check if model file exists and is compatible
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
+    
+    try:
+        model = joblib.load(MODEL_PATH)
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        print("Model may be incompatible with current scikit-learn version. Please retrain the model.")
+        raise
     
     # Read test data from XCom
     X_test_csv = context['ti'].xcom_pull(key='X_test_csv')
