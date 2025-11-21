@@ -5,8 +5,8 @@ from airflow.operators.python import PythonOperator
 from ml_pipeline_tasks.model import evaluate_and_report_dataset
 from ml_pipeline_tasks.utils import notify
 
-REPORT_PATH = "/opt/airflow/dags/repo/reports/model_report.txt"
-MODEL_PATH = "/opt/airflow/dags/repo/models/model_latest.pkl"
+REPORT_PATH = "/opt/airflow/reports/model_report.txt"
+MODEL_PATH = "/opt/airflow/models/model_latest.pkl"
 MIN_ACCURACY = 0.78
 
 def evaluate_and_report_task():
