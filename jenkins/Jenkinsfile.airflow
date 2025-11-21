@@ -52,7 +52,7 @@ spec:
                             
                             # Install dependencies with constraint file
                             pip install --upgrade pip --quiet
-                            pip install apache-airflow==2.8.0 apache-airflow-providers-postgres pandas scikit-learn joblib --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.8.0/constraints-3.11.txt" --quiet 2>&1 | grep -v WARNING || true
+                            pip install apache-airflow==2.8.0 apache-airflow-providers-postgres pandas scikit-learn joblib azure-storage-blob --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.8.0/constraints-3.11.txt" --quiet 2>&1 | grep -v WARNING || true
                             
                             echo ""
                             echo "TEST 1: Check DAG file exists"

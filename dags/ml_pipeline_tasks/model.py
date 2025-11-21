@@ -5,9 +5,55 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from ml_pipeline_tasks.data import PROCESSED_DATA_PATH
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from azure.storage.blob import BlobServiceClient
+from airflow.models import Variable
 
 MODEL_PATH = "/opt/airflow/dags/repo/models/model_latest.pkl"
 MIN_ACCURACY = 0.78
+
+# Azure Blob Storage configuration from Airflow Variables
+AZURE_STORAGE_CONNECTION_STRING = Variable.get("azure_storage_connection_string", "")
+AZURE_CONTAINER_NAME = Variable.get("azure_container_name", "ml-data")
+AZURE_MODEL_BLOB_NAME = Variable.get("azure_model_blob_name", "model_latest.pkl")
+
+def upload_model_to_azure_blob(local_path):
+    """Upload trained model to Azure Blob Storage"""
+    if not AZURE_STORAGE_CONNECTION_STRING:
+        print("Azure Storage connection string not configured, skipping upload")
+        return False
+    
+    try:
+        blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+        blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=AZURE_MODEL_BLOB_NAME)
+        
+        with open(local_path, "rb") as data:
+            blob_client.upload_blob(data, overwrite=True)
+        
+        print(f"Successfully uploaded model to Azure Blob Storage: {AZURE_MODEL_BLOB_NAME}")
+        return True
+    except Exception as e:
+        print(f"Error uploading model to Azure Blob Storage: {e}")
+        return False
+
+def download_model_from_azure_blob(local_path):
+    """Download model from Azure Blob Storage"""
+    if not AZURE_STORAGE_CONNECTION_STRING:
+        print("Azure Storage connection string not configured")
+        return False
+    
+    try:
+        blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+        blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=AZURE_MODEL_BLOB_NAME)
+        
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        with open(local_path, "wb") as download_file:
+            download_file.write(blob_client.download_blob().readall())
+        
+        print(f"Successfully downloaded model from Azure Blob Storage to {local_path}")
+        return True
+    except Exception as e:
+        print(f"Error downloading model from Azure Blob Storage: {e}")
+        return False
 
 def train_model(**context):
     """Train RandomForest on processed data"""
@@ -25,11 +71,20 @@ def train_model(**context):
     context['ti'].xcom_push(key='X_test', value=X_test.to_json())
     context['ti'].xcom_push(key='y_test', value=y_test.tolist())
 
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     print(f"Model trained and saved to {MODEL_PATH}")
+    
+    # Upload model to Azure Blob Storage
+    upload_model_to_azure_blob(MODEL_PATH)
 
 def test_model(**context):
     """Evaluate model"""
+    # Try to download model from Azure if not available locally
+    if not os.path.exists(MODEL_PATH):
+        print(f"Model not found locally, attempting to download from Azure...")
+        download_model_from_azure_blob(MODEL_PATH)
+    
     model = joblib.load(MODEL_PATH)
     X_test = pd.read_json(context['ti'].xcom_pull(key='X_test'))
     y_test = context['ti'].xcom_pull(key='y_test')
@@ -51,6 +106,21 @@ def decide_deployment(**context):
 
 def deploy_model():
     print(f"Deploying model: {MODEL_PATH}")
+    
+    # Upload to Azure Blob Storage as production model
+    if AZURE_STORAGE_CONNECTION_STRING:
+        try:
+            blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+            prod_blob_name = "model_production.pkl"
+            blob_client = blob_service_client.get_blob_client(container=AZURE_CONTAINER_NAME, blob=prod_blob_name)
+            
+            with open(MODEL_PATH, "rb") as data:
+                blob_client.upload_blob(data, overwrite=True)
+            
+            print(f"Model deployed to Azure Blob Storage as {prod_blob_name}")
+        except Exception as e:
+            print(f"Warning: Failed to deploy model to Azure: {e}")
+    
     print("Model deployment complete")
 
 def evaluate_and_report_dataset(preprocessed_dataset_path, report_path, model_path, min_accuracy=0.78):
