@@ -6,7 +6,7 @@ from sklearn.model_selection import train_test_split
 from ml_pipeline_tasks.data import PROCESSED_DATA_PATH
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
-MODEL_PATH = "/opt/airflow/dags/repo/models/model_latest.pkl"
+MODEL_PATH = "/opt/airflow/models/model_latest.pkl"
 MIN_ACCURACY = 0.78
 
 def train_model(**context):

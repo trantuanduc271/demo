@@ -2,18 +2,28 @@ import os
 import pandas as pd
 from airflow.datasets import Dataset
 from airflow.decorators import task
+import shutil
 
-DATA_PATH = "/opt/airflow/dags/repo/data/training_data.csv"
-PROCESSED_DATA_PATH = "/opt/airflow/dags/repo/data/processed_training_data.csv"
+# Read from git-sync mounted repo (read-only)
+SOURCE_DATA_PATH = "/opt/airflow/dags/repo/data/training_data.csv"
+
+# Write to writable locations
+DATA_PATH = "/opt/airflow/data/training_data.csv"
+PROCESSED_DATA_PATH = "/opt/airflow/data/processed_training_data.csv"
 
 # Dataset outlet
 PREPROCESSED_DATASET = Dataset(PROCESSED_DATA_PATH)
 
 def check_data_exists():
-    """Check if raw training data exists"""
-    if not os.path.exists(DATA_PATH):
-        raise FileNotFoundError(f"{DATA_PATH} not found")
-    print("Training data exists")
+    """Check if raw training data exists and copy to writable location"""
+    # Check if source data exists in repo
+    if not os.path.exists(SOURCE_DATA_PATH):
+        raise FileNotFoundError(f"{SOURCE_DATA_PATH} not found in repository")
+    
+    # Copy to writable location
+    os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
+    shutil.copy2(SOURCE_DATA_PATH, DATA_PATH)
+    print(f"Training data copied from {SOURCE_DATA_PATH} to {DATA_PATH}")
 
 @task(outlets=[PREPROCESSED_DATASET], do_xcom_push=False)
 def preprocess_data():
