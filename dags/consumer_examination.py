@@ -21,4 +21,14 @@ with DAG(
         bash_command="echo Helloworld, this is my first dag!",
     )
 
-    task1
+    task2 = BashOperator(
+        task_id="second_task",
+        bash_command="echo This is the second task",
+    )
+
+    task3 = BashOperator(
+        task_id="third_task",
+        bash_command="echo This is the third task",
+    )
+
+    task1 >> task2 >> task3
