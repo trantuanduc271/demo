@@ -22,16 +22,23 @@ def train_model(**context):
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
 
-    context['ti'].xcom_push(key='X_test', value=X_test.to_json())
+    # Save test data to XCom as CSV strings to avoid JSON issues
+    context['ti'].xcom_push(key='X_test_csv', value=X_test.to_csv(index=False))
     context['ti'].xcom_push(key='y_test', value=y_test.tolist())
 
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     print(f"Model trained and saved to {MODEL_PATH}")
 
 def test_model(**context):
     """Evaluate model"""
+    from io import StringIO
+    
     model = joblib.load(MODEL_PATH)
-    X_test = pd.read_json(context['ti'].xcom_pull(key='X_test'))
+    
+    # Read test data from XCom
+    X_test_csv = context['ti'].xcom_pull(key='X_test_csv')
+    X_test = pd.read_csv(StringIO(X_test_csv))
     y_test = context['ti'].xcom_pull(key='y_test')
 
     accuracy = accuracy_score(y_test, model.predict(X_test))
