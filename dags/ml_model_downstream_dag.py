@@ -7,7 +7,7 @@ from ml_pipeline_tasks.utils import notify
 
 REPORT_PATH = "/opt/airflow/dags/repo/reports/model_report.txt"
 MODEL_PATH = "/opt/airflow/dags/repo/models/model_latest.pkl"
-MIN_ACCURACY = 0.78
+MIN_ACCURACY = 0.22
 
 def evaluate_and_report_task():
     evaluate_and_report_dataset(

@@ -9,17 +9,6 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 MODEL_PATH = "/opt/airflow/dags/repo/models/model_latest.pkl"
 MIN_ACCURACY = 0.78
 
-def cleanup_old_models():
-    """Remove old model files to avoid version incompatibility issues"""
-    if os.path.exists(MODEL_PATH):
-        try:
-            os.remove(MODEL_PATH)
-            print(f"Removed old model file: {MODEL_PATH}")
-        except Exception as e:
-            print(f"Warning: Could not remove old model file: {e}")
-    else:
-        print("No existing model file to clean up")
-
 def train_model(**context):
     """Train RandomForest on processed data"""
     df = pd.read_csv(PROCESSED_DATA_PATH)
@@ -33,32 +22,16 @@ def train_model(**context):
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
 
-    # Save test data to XCom as CSV strings to avoid JSON issues
-    context['ti'].xcom_push(key='X_test_csv', value=X_test.to_csv(index=False))
+    context['ti'].xcom_push(key='X_test', value=X_test.to_json())
     context['ti'].xcom_push(key='y_test', value=y_test.tolist())
 
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     joblib.dump(model, MODEL_PATH)
     print(f"Model trained and saved to {MODEL_PATH}")
 
 def test_model(**context):
     """Evaluate model"""
-    from io import StringIO
-    
-    # Check if model file exists and is compatible
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
-    
-    try:
-        model = joblib.load(MODEL_PATH)
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        print("Model may be incompatible with current scikit-learn version. Please retrain the model.")
-        raise
-    
-    # Read test data from XCom
-    X_test_csv = context['ti'].xcom_pull(key='X_test_csv')
-    X_test = pd.read_csv(StringIO(X_test_csv))
+    model = joblib.load(MODEL_PATH)
+    X_test = pd.read_json(context['ti'].xcom_pull(key='X_test'))
     y_test = context['ti'].xcom_pull(key='y_test')
 
     accuracy = accuracy_score(y_test, model.predict(X_test))
