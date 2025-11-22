@@ -10,7 +10,7 @@ PROCESSED_DATA_PATH = "/opt/airflow/dags/repo/data/processed_training_data.csv"
 PREPROCESSED_DATASET = Dataset(PROCESSED_DATA_PATH)
 
 def check_data_exists():
-    """Check if raw training data exists"""
+    """Check if raw training data exists """
     if not os.path.exists(DATA_PATH):
         raise FileNotFoundError(f"{DATA_PATH} not found")
     print("Training data exists")
