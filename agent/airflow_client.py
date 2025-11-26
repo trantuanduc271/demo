@@ -49,6 +49,7 @@ class AirflowClient:
             "include_downstream": True,
             "include_upstream": False,
             "include_future": False,
+            "reset_dag_runs": True,
         }
         
         response = requests.post(url, auth=self.auth, headers=self.headers, json=data, verify=False)

@@ -11,7 +11,11 @@ default_args = {
     'retries': 0, # No retries so it fails immediately
 }
 
+import time
+
 def failing_task():
+    print("Starting task... waiting 60 seconds before failing.")
+    time.sleep(60)
     raise Exception("This is a planned failure to test the AI Agent!")
 
 with DAG(
